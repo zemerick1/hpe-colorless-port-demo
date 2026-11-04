@@ -4,6 +4,16 @@ A single-demo faceplate for colorless access ports. When a device connects, the 
 
 There is no application login. Switch, ClearPass, and Mist credentials are entered on the Admin page and stored in one SQLite file.
 
+## The demo
+
+EX4000, read through Mist. A pinned jack shows the port profile and the Mist role.
+
+![EX4000 faceplate with port mge-0/0/0 pinned](docs/ex-faceplate.png)
+
+AOS-CX 6200F, read from the switch. ClearPass adds the device detail on this faceplate when it is configured.
+
+![AOS-CX 6200F faceplate with port 4 pinned](docs/aos-cx-faceplate.png)
+
 ## What's supported today
 
 Two specific 12-port faceplates. A different 12-port model does not match the photo or the jack map.
