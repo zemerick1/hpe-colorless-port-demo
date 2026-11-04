@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Colorless Ports admin</title>
+  <link rel="stylesheet" href="/static/site.css">
+  <link rel="stylesheet" href="/static/admin.css">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="eyebrow">Single demo</p>
+      <h1>Admin</h1>
+    </div>
+    <a class="button" href="/">Faceplate</a>
+  </header>
+  <form class="admin" id="config-form">
+    <fieldset id="fields" disabled>
+      <section class="card group">
+        <details data-section="aruba">
+          <summary>Aruba</summary>
+          <div class="group-body">
+            <section class="card nested">
+              <details data-section="switch">
+                <summary>AOS-CX</summary>
+                <div class="card-body">
+                  <p class="help">Direct AOS-CX API. Username and password are exchanged for a session token, and later requests send that token. The faceplate is a 6200F and reads ports 1/1/1 through 1/1/12. ClearPass can add client detail. This faceplate does not call Mist.</p>
+                  <div class="grid">
+                    <label>Host <input id="switch-host" type="text" autocomplete="off" placeholder="192.168.199.4"></label>
+                    <label>HTTPS port <input id="switch-port" type="number" min="1" max="65535" value="443"></label>
+                    <label>Username <input id="switch-username" type="text" autocomplete="off"></label>
+                    <label>Password <input id="switch-password" type="password" autocomplete="new-password"></label>
+                    <label>REST version <input id="api-version" type="text" placeholder="v10.16"></label>
+                    <label>VSF member <input id="vsf-member" type="number" min="1" max="8" value="1"></label>
+                  </div>
+                  <div class="checks">
+                    <label class="check"><input id="switch-verify" type="checkbox"> Verify TLS certificate</label>
+                  </div>
+                  <div class="test-row">
+                    <button type="button" class="secondary" id="test-switch">Test switch</button>
+                    <p class="test-result" id="test-switch-result"></p>
+                  </div>
+                  <p class="status-line" id="switch-status"></p>
+                </div>
+              </details>
+            </section>
+
+            <section class="card nested">
+              <details data-section="roles">
+                <summary>Aruba Roles</summary>
+                <div class="card-body">
+                  <p class="help">AOS-CX faceplate only. The role name must match the role the switch applies. The EX faceplate uses the Juniper/Mist Roles and Port profiles sections. Legend order 0 hides a role. Empty color means no light. A link with no authenticated client stays dark, even when the Port up role has a color. Choose one Port up, one Port down, and one Multiple roles role.</p>
+                  <div id="roles"></div>
+                  <button type="button" class="secondary" id="add-role">Add role</button>
+                </div>
+              </details>
+            </section>
+          </div>
+        </details>
+      </section>
+
+      <section class="card group">
+        <details data-section="juniper">
+          <summary>Juniper/Mist</summary>
+          <div class="group-body">
+            <section class="card nested">
+              <details data-section="mist">
+                <summary>Mist</summary>
+                <div class="card-body">
+                  <p class="help">API token for the EX faceplate. Mist sends it on each request. Create one in the Mist UI. The token is required for that faceplate. The AOS-CX faceplate does not call Mist, and this demo does not open a Junos session.</p>
+                  <div class="grid">
+                    <label>API host <input id="mist-host" type="text" autocomplete="off" placeholder="api.mist.com"></label>
+                    <label>API token <input id="mist-token" type="password" autocomplete="new-password"></label>
+                  </div>
+                  <div class="checks">
+                    <label class="check"><input id="mist-verify" type="checkbox" checked> Verify TLS certificate</label>
+                  </div>
+                  <div class="test-row">
+                    <button type="button" class="secondary" id="test-mist">Test Mist</button>
+                    <p class="test-result" id="test-mist-result"></p>
+                  </div>
+                </div>
+              </details>
+            </section>
+
+            <section class="card nested">
+              <details data-section="ex">
+                <summary>EX switch</summary>
+                <div class="card-body">
+                  <p class="help">Juniper EX4000 through Mist only. Enter the Mist site and the switch MAC. The API token is in the Mist section above. Ports 0–11 (<code>ge-0/0/0</code>–<code>ge-0/0/11</code>, or <code>mge-</code> on the 12MP) light from the Mist role when a client has one, and from the port profile otherwise. SFP, management, and console stay dark. A link with no client stays dark. See SUPPORT.md.</p>
+                  <div class="grid">
+                    <label>Mist site ID <input id="ex-site-id" type="text" autocomplete="off" placeholder="site UUID"></label>
+                    <label>Switch MAC <input id="ex-switch-mac" type="text" autocomplete="off" placeholder="aa:bb:cc:dd:ee:ff"></label>
+                  </div>
+                  <div class="test-row">
+                    <button type="button" class="secondary" id="test-ex">Test EX</button>
+                    <p class="test-result" id="test-ex-result"></p>
+                  </div>
+                  <p class="status-line" id="ex-status"></p>
+                </div>
+              </details>
+            </section>
+
+            <section class="card nested">
+              <details data-section="profiles">
+                <summary>Port profiles</summary>
+                <div class="card-body">
+                  <p class="help">EX faceplate only. The name must match the port profile Mist applied (<code>port_usage</code>, the same string as usage and reportedProfile, for example <code>dot1x-only</code>). This list is not the Aruba role list and not the Roles list below. A connected client with no Mist role lights this profile. A client that has a role uses the Roles section instead. A link with no client stays dark. A profile that is not in this list still lights gray so you can add it. Legend order 0 hides it from the legend.</p>
+                  <div id="profiles"></div>
+                  <button type="button" class="secondary" id="add-profile">Add port profile</button>
+                </div>
+              </details>
+            </section>
+
+            <section class="card nested">
+              <details data-section="mist-roles">
+                <summary>Roles</summary>
+                <div class="card-body">
+                  <p class="help">EX faceplate only. These are the radius-group roles from the Mist switch template, such as <code>EMPLOYEE</code> and <code>IOT</code>. The name must match the role Mist applies to the client. A client with a role lights that color. A client with no role keeps the port profile color. A role that is not listed yet still lights gray. Legend order 0 hides it from the legend. AOS-CX does not use this list.</p>
+                  <div id="mist-roles"></div>
+                  <button type="button" class="secondary" id="add-mist-role">Add role</button>
+                </div>
+              </details>
+            </section>
+          </div>
+        </details>
+      </section>
+
+      <section class="card">
+        <details data-section="clearpass">
+          <summary>ClearPass</summary>
+          <div class="card-body">
+            <p class="help">Used only by the AOS-CX faceplate, and only as extra client detail. Client ID and secret are exchanged for a bearer token, which fills device name, type, and address on that popover. The demo runs without it. Port color still comes from the switch role. The EX faceplate does not call ClearPass.</p>
+            <div class="grid">
+              <label>Host <input id="clearpass-host" type="text" autocomplete="off" placeholder="https://clearpass.example.com"></label>
+              <label>Client ID <input id="clearpass-client-id" type="text" autocomplete="off"></label>
+              <label>Client secret <input id="clearpass-client-secret" type="password" autocomplete="new-password"></label>
+            </div>
+            <div class="checks">
+              <label class="check"><input id="clearpass-verify" type="checkbox"> Verify TLS certificate</label>
+            </div>
+            <div class="test-row">
+              <button type="button" class="secondary" id="test-clearpass">Test ClearPass</button>
+              <p class="test-result" id="test-clearpass-result"></p>
+            </div>
+            <p class="status-line" id="clearpass-status"></p>
+          </div>
+        </details>
+      </section>
+
+      <section class="card">
+        <details data-section="timing">
+          <summary>Timing</summary>
+          <div class="card-body">
+            <div class="grid">
+              <label>Poll interval (seconds) <input id="poll-interval" type="number" min="0.5" max="30" step="0.1"></label>
+              <label>Screen interval (seconds) <input id="screen-interval" type="number" min="0.3" max="5" step="0.1"></label>
+            </div>
+            <div class="checks">
+              <label class="check"><input id="hide-previous" type="checkbox"> Keep only the newest popover open</label>
+              <label class="check"><input id="show-device-name" type="checkbox"> On MAC auth, label the name as Device name</label>
+            </div>
+          </div>
+        </details>
+      </section>
+    </fieldset>
+    <div class="bar">
+      <button type="submit" id="save">Save</button>
+      <button type="button" class="secondary" id="reload">Reload</button>
+      <p class="form-msg" id="form-msg"></p>
+    </div>
+  </form>
+  <script src="/static/admin.js"></script>
+</body>
+</html>

@@ -1,0 +1,227 @@
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #98a2ad;
+}
+
+.dot.ok { background: var(--ok); box-shadow: 0 0 0 4px rgba(31, 122, 77, 0.15); }
+.dot.bad { background: var(--danger); }
+.dot.idle { background: #c4ccd4; }
+
+.banner {
+  width: min(var(--column), calc(100% - 40px));
+  margin: 12px auto 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #fff6f6;
+  color: var(--danger);
+}
+
+.platform-switch {
+  display: flex;
+  justify-content: center;
+  width: min(var(--column), calc(100% - 40px));
+  margin: 16px auto 0;
+}
+
+.platform-switch .group {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+}
+
+.platform-switch button {
+  background: transparent;
+  color: var(--muted);
+  padding: 8px 16px;
+}
+
+.platform-switch button[aria-pressed="true"] {
+  background: var(--button);
+  color: var(--button-ink);
+}
+
+.stage {
+  width: min(var(--column), calc(100% - 40px));
+  margin: 8px auto 0;
+  padding: 0;
+}
+
+.faceplate {
+  display: none;
+  position: relative;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.faceplate.is-active { display: block; }
+
+.faceplate img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.faceplate .port {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  box-shadow: none;
+  color: transparent;
+  font-size: 0;
+  line-height: 0;
+  min-width: 0;
+  min-height: 0;
+  cursor: pointer;
+}
+
+.faceplate .port.is-lit {
+  background: var(--lamp, #888);
+  box-shadow:
+    0 0 8px 2px var(--lamp, #888),
+    0 0 18px 4px var(--lamp, #888);
+}
+
+.faceplate .port.pinned {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+
+.faceplate .port:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+
+.legend-card {
+  width: min(var(--column), calc(100% - 40px));
+  margin: 22px auto 40px;
+  padding: 18px 22px 20px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.legend-card h2 {
+  margin: 0 0 14px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+#legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+#legend.grouped { display: block; }
+
+.legend-group { margin: 0 0 16px; }
+.legend-group:last-child { margin-bottom: 0; }
+
+.legend-label {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.legend-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 4px 12px 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #f7f8fa;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px #c5ced6;
+}
+
+.swatch.on {
+  background: var(--swatch);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+
+.hint {
+  max-width: 62ch;
+  margin: 14px auto 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.popover {
+  position: fixed;
+  z-index: 20;
+  width: min(340px, calc(100vw - 16px));
+  padding: 14px 16px 16px;
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(20, 28, 38, 0.18);
+}
+
+.popover h3 { margin: 0 0 8px; font-size: 16px; font-weight: 600; letter-spacing: -0.02em; }
+
+.popover p { margin: 0 0 3px; font-size: 14px; }
+.popover p strong { font-weight: 700; }
+
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.tabs button {
+  padding: 6px 10px;
+  background: #eceff3;
+  color: var(--ink);
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.tabs button.active {
+  background: var(--button);
+  color: var(--button-ink);
+}
+
+.pin-note { color: var(--muted); font-size: 12px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .faceplate .port.is-lit { box-shadow: inset 0 0 0 2px var(--lamp, #888); }
+}

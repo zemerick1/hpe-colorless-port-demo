@@ -1,0 +1,15 @@
+services:
+  colorless-ports:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - colorless-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  colorless-data:
