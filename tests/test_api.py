@@ -23,9 +23,12 @@ def test_seed_and_pages(client):
     health = client.get("/api/health")
     assert health.json() == {"ok": True}
     assert "no-store" in health.headers["cache-control"]
-    assert 'id="faceplate"' in client.get("/").text
+    page = client.get("/").text
+    assert 'id="faceplate"' in page
+    assert 'id="open-faq"' in page
     admin = client.get("/admin")
     assert 'id="config-form"' in admin.text
+    assert 'id="open-faq"' in admin.text
     assert "Single demo" in admin.text
 
     config = client.get("/api/admin/config").json()
@@ -484,3 +487,192 @@ def test_ex_check_failure_keeps_the_last_ports(client, monkeypatch):
     assert TOKEN not in failed.text
     assert client.app.state.poll.ex_hostname == "keep-me"
     assert client.app.state.poll.ex_ports[0].status == "up"
+
+
+JUNOS_PASSWORD = "junos-secret"
+
+
+def test_role_loads_merge_colors_and_keep_stored_secrets(client, db_path, monkeypatch):
+    admin = client.get("/admin").text
+    assert admin.index('data-section="mist"') < admin.index('data-section="junos"')
+    assert admin.index('data-section="junos"') < admin.index('data-section="ex"')
+    assert 'id="load-junos-roles"' in admin
+    assert 'id="load-mist-roles"' in admin
+    assert 'id="ex-source-mist"' in admin
+    assert 'id="ex-source-junos"' in admin
+    assert admin.index('data-section="ex-source"') < admin.index('data-section="mist"')
+    assert 'id="junos-status"' in admin
+    assert admin.index("</form>") < admin.index('id="faq"')
+    page = client.get("/").text
+    actions = page.index('class="top-actions"')
+    assert actions < page.index('id="open-faq"') < page.index('href="/admin"')
+
+    config = client.get("/api/admin/config").json()
+    employee = next(role for role in config["mist_roles"] if role["name"] == "EMPLOYEE")
+    payload = _base_payload(config)
+    payload.update({
+        "junos_host": "192.0.2.8",
+        "junos_port": 3443,
+        "junos_username": "lab",
+        "junos_password": JUNOS_PASSWORD,
+        "mist_api_token": TOKEN,
+        "ex_site_id": SITE,
+        "ex_switch_mac": EX_MAC,
+    })
+    saved = client.put("/api/admin/config", json=payload)
+    assert saved.status_code == 200
+    assert JUNOS_PASSWORD not in saved.text
+    assert TOKEN not in saved.text
+    assert saved.json()["junos_password_set"] is True
+    assert saved.json()["poll"]["ex"]["source"] == "junos"
+
+    seen = {}
+
+    class FakeJunos:
+        def __init__(self, target):
+            seen["password"] = target.password
+            seen["host"] = target.host
+
+        async def filter_names(self):
+            return ["EMPLOYEE", "CAMERA"]
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr("app.main.JunosSession", FakeJunos)
+    loaded = client.post(
+        "/api/admin/roles/junos",
+        json={
+            "junos_host": "192.0.2.8",
+            "junos_port": 3443,
+            "junos_username": "lab",
+            "junos_password": "",
+            "mist_roles": [employee],
+        },
+    )
+    assert loaded.status_code == 200
+    body = loaded.json()
+    assert body["ok"] is True
+    assert body["added"] == ["CAMERA"]
+    assert body["present"] == ["EMPLOYEE"]
+    kept = next(role for role in body["roles"] if role["name"] == "EMPLOYEE")
+    assert kept["port_color"] == employee["port_color"]
+    camera = next(role for role in body["roles"] if role["name"] == "CAMERA")
+    assert camera["port_color"] != employee["port_color"]
+    assert camera["description"] == "Ethernet-switching firewall filter on the switch."
+    assert JUNOS_PASSWORD not in loaded.text
+    assert seen["password"] == JUNOS_PASSWORD
+    assert [role["name"] for role in client.get("/api/admin/config").json()["mist_roles"]] == [
+        "EMPLOYEE",
+        "IOT",
+    ]
+
+    class EmptyJunos(FakeJunos):
+        async def filter_names(self):
+            return []
+
+    monkeypatch.setattr("app.main.JunosSession", EmptyJunos)
+    empty = client.post(
+        "/api/admin/roles/junos",
+        json={
+            "junos_host": "192.0.2.8",
+            "junos_username": "lab",
+            "junos_password": "",
+            "mist_roles": [employee],
+        },
+    )
+    assert empty.status_code == 200
+    assert empty.json() == {"ok": False, "error": "Junos has no ethernet-switching filters"}
+    assert JUNOS_PASSWORD not in empty.text
+
+    class FakeMist:
+        def __init__(self, target):
+            seen["token"] = target.api_token
+
+        async def switch_template_roles(self, site):
+            assert site == SITE
+            return ("access", ["EMPLOYEE", "IOT"])
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr("app.main.MistSession", FakeMist)
+    custom = dict(employee)
+    custom["port_color"] = "#112233"
+    templated = client.post(
+        "/api/admin/roles/mist-template",
+        json={
+            "mist_host": "api.mist.com",
+            "mist_api_token": "",
+            "mist_verify_tls": True,
+            "ex_site_id": SITE,
+            "mist_roles": [custom],
+        },
+    )
+    assert templated.status_code == 200
+    listed = templated.json()
+    assert listed["ok"] is True
+    assert listed["template"] == "access"
+    assert listed["added"] == ["IOT"]
+    assert listed["present"] == ["EMPLOYEE"]
+    kept_employee = next(role for role in listed["roles"] if role["name"] == "EMPLOYEE")
+    assert kept_employee["port_color"] == "#112233"
+    iot = next(role for role in listed["roles"] if role["name"] == "IOT")
+    assert iot["description"] == "Radius-group role on the Mist switch template."
+    assert TOKEN not in templated.text
+    assert JUNOS_PASSWORD not in templated.text
+    assert seen["token"] == TOKEN
+
+    after = client.get("/api/admin/config").json()
+    assert [role["name"] for role in after["mist_roles"]] == ["EMPLOYEE", "IOT"]
+    stored_employee = next(role for role in after["mist_roles"] if role["name"] == "EMPLOYEE")
+    assert stored_employee["port_color"] == employee["port_color"]
+
+    payload["junos_host"] = ""
+    payload["junos_password"] = ""
+    cleared = client.put("/api/admin/config", json=payload)
+    assert cleared.status_code == 200
+    assert cleared.json()["junos_host"] == ""
+    assert cleared.json()["junos_password_set"] is True
+    assert cleared.json()["poll"]["ex"]["source"] == "mist"
+    assert get_settings(db_path)["junos_password"] == JUNOS_PASSWORD
+    assert JUNOS_PASSWORD not in cleared.text
+
+
+def test_ex_polling_choice_switches_without_clearing_the_other_source(client, db_path):
+    config = client.get("/api/admin/config").json()
+    assert config["ex_source_choice"] == "mist"
+    payload = _base_payload(config)
+    payload.update({
+        "junos_host": "192.0.2.8",
+        "junos_username": "lab",
+        "junos_password": JUNOS_PASSWORD,
+        "mist_api_token": TOKEN,
+        "ex_site_id": SITE,
+        "ex_switch_mac": EX_MAC,
+        "ex_source_choice": "mist",
+    })
+    mist = client.put("/api/admin/config", json=payload)
+    assert mist.status_code == 200
+    assert mist.json()["ex_source_choice"] == "mist"
+    assert mist.json()["poll"]["ex"]["source"] == "mist"
+    assert mist.json()["poll"]["ex"]["choice"] == "mist"
+    assert mist.json()["junos_host"] == "192.0.2.8"
+    assert get_settings(db_path)["junos_password"] == JUNOS_PASSWORD
+
+    payload["ex_source_choice"] = "junos"
+    payload["junos_password"] = ""
+    payload["mist_api_token"] = ""
+    junos = client.put("/api/admin/config", json=payload)
+    assert junos.status_code == 200
+    body = junos.json()
+    assert body["ex_source_choice"] == "junos"
+    assert body["poll"]["ex"]["source"] == "junos"
+    assert body["ex_site_id"] == SITE
+    assert body["junos_host"] == "192.0.2.8"
+    assert get_settings(db_path)["mist_api_token"] == TOKEN
+    assert JUNOS_PASSWORD not in junos.text
+
+    payload["ex_source_choice"] = "both"
+    rejected = client.put("/api/admin/config", json=payload)
+    assert rejected.status_code == 400

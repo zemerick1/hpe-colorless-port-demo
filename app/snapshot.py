@@ -357,18 +357,41 @@ def _visible_profiles(
     profiles: list[dict],
     mist_roles: list[dict],
 ) -> list[dict]:
-    """Color an EX client from its Mist role, then from the applied port profile."""
+    """Color an EX client from its access name, then from the Mist port profile.
+
+    The access name is a Mist role or a Junos firewall filter. A Junos session
+    does not fall back to a port profile. A session with no filter stays gray.
+    """
     visible = []
     for client in clients:
+        is_filter = client.access_kind == "filter"
+        if is_filter and not client.mist_role:
+            visible.append(_ex_client_row(
+                client,
+                color="#888888",
+                identity=client.mac or "no-filter",
+                profile={"name": "", "label": "", "description": "", "color": "", "no_popover": False},
+                role={
+                    "name": "",
+                    "label": "",
+                    "description": "No firewall filter is applied to this session.",
+                    "color": "#888888",
+                    "no_popover": False,
+                },
+                no_popover=False,
+            ))
+            continue
         profile = _named_paint(
-            client.role,
+            "" if is_filter else client.role,
             profiles,
             "This port profile is not on the admin list yet.",
         )
         role = _named_paint(
             client.mist_role,
             mist_roles,
-            "This Mist role is not on the admin list yet.",
+            "This firewall filter is not on the admin list yet."
+            if is_filter
+            else "This Mist role is not on the admin list yet.",
         )
         if client.mist_role and (role["color"] or not role["known"]):
             color = role["color"] or "#888888"
@@ -378,37 +401,48 @@ def _visible_profiles(
             color = profile["color"]
             no_popover = profile["no_popover"]
             identity = profile["name"] or "Unknown"
-        method = auth_label(client.auth_method)
-        visible.append(
-            {
-                "mac": client.mac,
-                "username": client.device_name or client.username or client.mac,
-                "username_title": "Device name",
-                "auth_method": method,
-                "kind": "profile",
-                "role_name": identity or "Unknown",
-                "role_label": profile["label"] or "Unknown",
-                "role_description": profile["description"],
-                "profile_name": profile["name"],
-                "profile_label": profile["label"],
-                "profile_color": profile["color"] or ("#888888" if profile["name"] and not profile["known"] else ""),
-                "mist_role_name": role["name"],
-                "mist_role_label": role["label"],
-                "mist_role_description": role["description"],
-                "mist_role_color": role["color"] or ("#888888" if role["name"] and not role["known"] else ""),
-                "color": color,
-                "device_type": client.device_type,
-                "device_category": client.device_category,
-                "device_family": client.device_family,
-                "ip_address": client.ip_address,
-                "vlan": client.vlan,
-                "forwarding": client.forwarding,
-                "tunnel": client.tunnel,
-                "detail": True,
-                "no_popover": no_popover,
-            }
-        )
+        visible.append(_ex_client_row(client, color, identity or "Unknown", profile, role, no_popover))
     return visible
+
+
+def _ex_client_row(
+    client: RawClient,
+    color: str,
+    identity: str,
+    profile: dict,
+    role: dict,
+    no_popover: bool,
+) -> dict:
+    is_filter = client.access_kind == "filter"
+    return {
+        "mac": client.mac,
+        "username": client.device_name or client.username or client.mac,
+        "username_title": "Device name",
+        "auth_method": auth_label(client.auth_method),
+        "kind": "profile",
+        "role_name": identity or "Unknown",
+        "role_label": profile["label"] or ("" if is_filter else "Unknown"),
+        "role_description": profile["description"],
+        "profile_name": profile["name"],
+        "profile_label": profile["label"],
+        "profile_color": profile["color"] or ("#888888" if profile["name"] and not profile.get("known", True) else ""),
+        "mist_role_name": role["name"],
+        "mist_role_label": role["label"],
+        "mist_role_description": role["description"],
+        "mist_role_color": role["color"] or ("#888888" if role["name"] and not role.get("known", True) else ""),
+        "access_kind": "filter" if is_filter else "role",
+        "access_label": "Firewall filter" if is_filter else "Role",
+        "color": color,
+        "device_type": client.device_type,
+        "device_category": client.device_category,
+        "device_family": client.device_family,
+        "ip_address": client.ip_address,
+        "vlan": client.vlan,
+        "forwarding": client.forwarding,
+        "tunnel": client.tunnel,
+        "detail": True,
+        "no_popover": no_popover,
+    }
 
 
 def _port_color(

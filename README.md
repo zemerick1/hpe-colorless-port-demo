@@ -6,7 +6,7 @@ There is no application login. Switch, ClearPass, and Mist credentials are enter
 
 ## The demo
 
-EX4000, read through Mist. A pinned jack shows the port profile and the Mist role.
+EX4000. This shot is the Mist source: the pinned jack shows the port profile and the Mist role. Choose Junos under EX polling to read the switch directly. The popover then says Firewall filter.
 
 ![EX4000 faceplate with port mge-0/0/0 pinned](docs/ex-faceplate.png)
 
@@ -20,9 +20,13 @@ Two specific 12-port faceplates. A different 12-port model does not match the ph
 
 **Aruba 6200F, 12 access ports.** The app reads the switch REST API directly. Ports `1/1/1` through `1/1/12` are the jacks on the left of the photo (odd on top, even on the bottom). The 1G, SFP, and management ports on the right stay dark. The color is the role the switch applied. ClearPass is optional: when it is configured it adds device name, type, and address to the Aruba popover. The demo runs, and the jacks still color, with ClearPass left blank. This faceplate does not call Mist.
 
-**Juniper EX4000, 12 copper ports.** The app reads this switch through Mist only. There is no Junos session. Ports `0`–`11` (`ge-0/0/0`–`ge-0/0/11`, or `mge-0/0/0`–`mge-0/0/11`) are the copper jacks. On an EX4000-12MP the first four are usually `mge` and the rest `ge`. SFP ports (`xe-0/1/*`), management, and console stay dark. A Mist API token, the site ID, and the switch MAC are required for this faceplate. ClearPass is not queried. A radius-group role colors the jack when Mist applied one to the client. Otherwise the applied port profile does. A link with no client stays dark.
+**Juniper EX4000, 12 copper ports.** Ports `0`–`11` (`ge-0/0/0`–`ge-0/0/11`, or `mge-0/0/0`–`mge-0/0/11`) are the copper jacks. On an EX4000-12MP the first four are usually `mge` and the rest `ge`. SFP ports (`xe-0/1/*`), management, and console stay dark. ClearPass is not queried. A link with no client or session stays dark.
 
-Not covered: other Aruba or Juniper chassis (including other 12-port models), Aruba Central as the data source, and a direct Junos connection.
+One source is live. Under Juniper/Mist, EX polling chooses Mist or Junos, and Save applies that choice. The other source stays filled in and idle. Junos reads the switch REST API. The switch must already have `system services rest https` (port 3443 by default). Mist uses a radius-group role when Mist applied one, and the port profile otherwise. There is no port profile on the Junos path.
+
+Junos has no role object. Mist still calls it a Role. Mist pushes an ethernet-switching firewall filter of the same name only after that role is applied to a Switch Policy. In Mist, that firewall filter is the Switch Policy. A role that is not on a Switch Policy is never pushed, so the filter and the role never appear on the switch. The faceplate says Role for Mist and Firewall filter for Junos. The FAQ next to Admin spells this out.
+
+Not covered: other Aruba or Juniper chassis (including other 12-port models), and Aruba Central as a data source.
 
 `SUPPORT.md` is the field-by-field description of what each faceplate reads.
 
@@ -40,7 +44,7 @@ The service listens on port **8080**.
 - Admin: `http://localhost:8080/admin`
 - Health: `http://localhost:8080/api/health`
 
-Open Admin and fill in the switch. Add ClearPass only if you want the extra Aruba client fields. For the EX faceplate, fill in the Mist API token, site ID, and switch MAC, then the port profiles and roles. A blank password, client secret, or API token on Save keeps the value already stored. Admin never returns those secrets.
+Open Admin and fill in the switch. Add ClearPass only if you want the extra Aruba client fields. For the EX faceplate, fill in Junos (host, username, password) and the Mist API token, site ID, and switch MAC. Under EX polling, choose Mist or Junos and Save. That choice is what gets polled. Then set the port profiles and roles. Load from Junos reads ethernet-switching filter names already on the switch, which includes a Mist role only after it is applied to a Switch Policy. Load from the Mist switch template reads radius-group roles from the template. Save keeps the list. A blank password, client secret, or API token on Save keeps the value already stored. Admin never returns those secrets.
 
 The poller runs only while a browser has the faceplate open.
 

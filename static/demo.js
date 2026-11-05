@@ -1,6 +1,6 @@
 const HINTS = {
   cx: "Ports 1–12 light from the access role. Click a lit port to pin its details. The 1G, SFP, and management ports on the right stay dark.",
-  ex: "Ports ge-0/0/0–11 light from the Mist port profile applied to a connected client. Click a lit port to pin its details. SFP, management, and console stay dark.",
+  ex: "Ports ge-0/0/0–11 light from the live source. Mist calls that name a Role. Direct Junos shows it as a firewall filter. Click a lit port to pin its details. SFP, management, and console stay dark.",
 };
 
 const state = {
@@ -188,9 +188,11 @@ function fillClient(pane, client) {
   }
   const profile = client.kind === "profile";
   pane.append(row("Auth method", client.auth_method || "—"));
+  const accessLabel = client.access_label || "Role";
+  const junosFilter = client.access_kind === "filter";
   if (profile) {
-    pane.append(row("Port profile", client.role_label || "—"));
-    pane.append(row("Role", client.mist_role_label || "—"));
+    if (!junosFilter) pane.append(row("Port profile", client.role_label || "—"));
+    pane.append(row(accessLabel, client.mist_role_label || "—"));
   } else {
     pane.append(row("Role", client.role_label || "—"));
   }
@@ -204,8 +206,8 @@ function fillClient(pane, client) {
   pane.append(row("Forwarding", client.forwarding || "—"));
   if (client.forwarding === "Tunneled" && client.tunnel) pane.append(row("Tunnel", client.tunnel));
   if (profile) {
-    if (client.role_description) pane.append(row("Profile notes", client.role_description));
-    if (client.mist_role_description) pane.append(row("Role notes", client.mist_role_description));
+    if (!junosFilter && client.role_description) pane.append(row("Profile notes", client.role_description));
+    if (client.mist_role_description) pane.append(row(accessLabel + " notes", client.mist_role_description));
   } else {
     pane.append(row("Permissions", client.role_description || "—"));
   }
@@ -295,7 +297,7 @@ function renderStatus(snap) {
     dot.classList.add("idle");
     text.textContent = "No switch configured";
     if ((snap.platform || state.platform) === "ex") {
-      notes.push("Open Admin, save a Mist API token, and enter the EX site and switch MAC. Junos is not contacted.");
+      notes.push("Open Admin, choose Mist or Junos under EX polling, and save that source.");
     } else {
       notes.push("Open Admin and enter the AOS-CX switch. Username and password are exchanged for a session token.");
     }
@@ -310,6 +312,9 @@ function renderStatus(snap) {
     dot.classList.add("ok");
     const ver = poll.software_version ? " · " + poll.software_version : "";
     text.textContent = (poll.hostname || "Switch") + ver + " · " + timeAgo(poll.polled_at);
+  }
+  if ((snap.platform || state.platform) === "ex") {
+    document.getElementById("platform-label").textContent = exHeading(poll.source);
   }
   if (poll.clearpass_configured && poll.clearpass_error) notes.push("ClearPass: " + poll.clearpass_error);
   banner.hidden = notes.length === 0;
@@ -334,6 +339,10 @@ function luminance(hex) {
   return red * 0.2126 + green * 0.7152 + blue * 0.0722;
 }
 
+document.getElementById("open-faq").addEventListener("click", () => {
+  document.getElementById("faq").showModal();
+});
+
 window.addEventListener("resize", () => {
   for (const number of state.open) {
     const pop = state.popovers.get(number);
@@ -341,6 +350,12 @@ window.addEventListener("resize", () => {
     if (pop && anchor) placePopover(pop, anchor, anchor.dataset.row === "top" ? "top" : "bottom");
   }
 });
+
+function exHeading(source) {
+  if (source === "junos") return "EX4000 · Junos";
+  if (source === "mist") return "EX4000 · Mist";
+  return "EX4000";
+}
 
 function showPlatform(platform) {
   state.platform = platform;
@@ -358,7 +373,8 @@ function showPlatform(platform) {
   const ex = document.getElementById("platform-ex");
   cx.setAttribute("aria-pressed", platform === "cx" ? "true" : "false");
   ex.setAttribute("aria-pressed", platform === "ex" ? "true" : "false");
-  document.getElementById("platform-label").textContent = platform === "ex" ? "EX4000 · Mist" : "AOS-CX 6200F";
+  const source = state.snap && state.snap.poll ? state.snap.poll.source : "";
+  document.getElementById("platform-label").textContent = platform === "ex" ? exHeading(source) : "AOS-CX 6200F";
   document.getElementById("legend-title").textContent = platform === "ex" ? "EX colors" : "Role colors";
   document.getElementById("legend-hint").textContent = HINTS[platform];
   try {

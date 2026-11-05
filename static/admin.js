@@ -22,6 +22,13 @@ const ids = {
   mistVerify: "mist-verify",
   exSite: "ex-site-id",
   exMac: "ex-switch-mac",
+  junosHost: "junos-host",
+  junosPort: "junos-port",
+  junosUsername: "junos-username",
+  junosPassword: "junos-password",
+  junosVerify: "junos-verify",
+  exSourceMist: "ex-source-mist",
+  exSourceJunos: "ex-source-junos",
   pollInterval: "poll-interval",
   screenInterval: "screen-interval",
   hidePrevious: "hide-previous",
@@ -67,6 +74,17 @@ function fill(data) {
   byId(ids.mistVerify).checked = data.mist_verify_tls !== false;
   byId(ids.exSite).value = data.ex_site_id || "";
   byId(ids.exMac).value = data.ex_switch_mac || "";
+  byId(ids.junosHost).value = data.junos_host || "";
+  byId(ids.junosPort).value = data.junos_port || 3443;
+  byId(ids.junosUsername).value = data.junos_username || "";
+  byId(ids.junosPassword).value = "";
+  byId(ids.junosPassword).placeholder = data.junos_password_set
+    ? "Saved password kept if blank"
+    : "Junos password";
+  byId(ids.junosVerify).checked = Boolean(data.junos_verify_tls);
+  const exChoice = data.ex_source_choice === "junos" ? "junos" : "mist";
+  byId(ids.exSourceJunos).checked = exChoice === "junos";
+  byId(ids.exSourceMist).checked = exChoice === "mist";
   byId(ids.pollInterval).value = data.poll_interval_sec;
   byId(ids.screenInterval).value = data.screen_interval_sec;
   byId(ids.hidePrevious).checked = Boolean(data.hide_previous_popovers);
@@ -100,23 +118,46 @@ function renderPoll(poll) {
 
 function renderEx(ex) {
   const line = byId("ex-status");
-  if (!ex.configured) {
-    line.textContent = "Idle until a Mist site, switch MAC, and API token are saved.";
+  const junos = byId("junos-status");
+  const choiceLine = byId("ex-source-status");
+  const detail = exDetail(ex);
+  const choice = ex.choice || "";
+  const active = ex.source || "";
+  if (choiceLine) choiceLine.textContent = sourceStatus(choice, active);
+  if (active === "junos") {
+    line.textContent = "Idle. Junos is the EX source.";
+    junos.textContent = detail || "Polling Junos.";
     return;
   }
-  if (!ex.watching && !ex.polled_at) {
-    line.textContent = "Idle. Open the faceplate and choose EX to start polling.";
+  if (active === "mist") {
+    junos.textContent = "Idle. Mist is the EX source.";
+    line.textContent = detail || "Polling Mist.";
     return;
   }
-  if (ex.error) {
-    line.textContent = ex.error;
-    return;
-  }
+  junos.textContent = choice === "junos"
+    ? "Selected. Enter a host, username, and password, then Save."
+    : "Idle. Mist is selected under EX polling.";
+  line.textContent = choice === "mist"
+    ? "Selected. Enter a site, switch MAC, and API token, then Save."
+    : "Idle. Junos is selected under EX polling.";
+}
+
+function sourceStatus(choice, active) {
+  if (active === "junos") return "Junos is the EX source. Choose Mist and Save to switch. The Junos host can stay filled in.";
+  if (active === "mist") return "Mist is the EX source. Choose Junos and Save to switch. The Mist site and token can stay filled in.";
+  if (choice === "junos") return "Junos is selected. Enter a host, username, and password, then Save.";
+  if (choice === "mist") return "Mist is selected. Enter a site, switch MAC, and API token, then Save.";
+  return "Choose Mist or Junos, then Save.";
+}
+
+function exDetail(ex) {
+  if (!ex.configured) return "";
+  if (!ex.watching && !ex.polled_at) return "Idle. Open the faceplate and choose EX to start polling.";
+  if (ex.error) return ex.error;
   if (ex.polled_at) {
-    line.textContent = (ex.hostname || "EX") + (ex.software_version ? " · " + ex.software_version : "") + " · last poll " + ex.polled_at;
-    return;
+    return (ex.hostname || "EX") + (ex.software_version ? " · " + ex.software_version : "") + " · last poll " + ex.polled_at;
   }
-  line.textContent = ex.watching ? "Waiting for the first Mist poll." : "Idle. Open the faceplate and choose EX to start polling.";
+  return ex.watching ? "Waiting for the first poll." : "Idle. Open the faceplate and choose EX to start polling.";
 }
 
 const specialLabels = { up: "Port up", down: "Port down", multi: "Multiple" };
@@ -566,6 +607,12 @@ function payload() {
     mist_verify_tls: byId(ids.mistVerify).checked,
     ex_site_id: byId(ids.exSite).value,
     ex_switch_mac: byId(ids.exMac).value,
+    junos_host: byId(ids.junosHost).value,
+    junos_port: Number(byId(ids.junosPort).value || 3443),
+    junos_username: byId(ids.junosUsername).value,
+    junos_password: byId(ids.junosPassword).value,
+    junos_verify_tls: byId(ids.junosVerify).checked,
+    ex_source_choice: byId(ids.exSourceJunos).checked ? "junos" : "mist",
     poll_interval_sec: Number(byId(ids.pollInterval).value),
     screen_interval_sec: Number(byId(ids.screenInterval).value),
     visualize_unknown: false,
@@ -643,6 +690,20 @@ byId("reload").addEventListener("click", () => {
 byId("add-role").addEventListener("click", addRole);
 byId("add-profile").addEventListener("click", addProfile);
 byId("add-mist-role").addEventListener("click", addMistRole);
+byId("open-faq").addEventListener("click", () => {
+  document.getElementById("faq").showModal();
+});
+byId("load-junos-roles").addEventListener("click", () => {
+  const body = payload();
+  postLoad("/api/admin/roles/junos", body, (data) => loadSummary(data, "Junos"));
+});
+byId("load-mist-roles").addEventListener("click", () => {
+  const body = payload();
+  postLoad("/api/admin/roles/mist-template", body, (data) => {
+    const from = data.template ? "Mist template " + data.template : "Mist template";
+    return loadSummary(data, from);
+  });
+});
 byId("test-switch").addEventListener("click", () => {
   const body = payload();
   postTest("/api/admin/test/switch", body, "test-switch-result", (data) => {
@@ -666,6 +727,44 @@ byId("test-ex").addEventListener("click", () => {
     return host + ver + " · " + data.ports_up + " of 12 ports up · " + data.clients + " clients";
   });
 });
+byId("test-junos").addEventListener("click", () => {
+  postTest("/api/admin/test/junos", payload(), "test-junos-result", (data) => {
+    const host = data.hostname || "Junos";
+    const ver = data.software_version ? " · " + data.software_version : "";
+    return host + ver + " · " + data.ports_up + " of 12 ports up · " + data.clients + " clients";
+  });
+});
+
+function loadSummary(data, source) {
+  const added = data.added || [];
+  const present = data.present || [];
+  const parts = [];
+  if (added.length) parts.push("Added " + added.join(", "));
+  if (present.length) parts.push(present.join(", ") + " already on the list");
+  if (!parts.length) parts.push("No roles returned");
+  return source + ". " + parts.join(". ") + ". Save to keep them.";
+}
+
+async function postLoad(url, body, successText) {
+  showTest("load-roles-result", true, "Contacting…");
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    showTest("load-roles-result", false, errorText(data));
+    return;
+  }
+  if (!data.ok) {
+    showTest("load-roles-result", false, data.error || "Failed");
+    return;
+  }
+  renderMistRoles(data.roles || []);
+  openSection("mist-roles");
+  showTest("load-roles-result", true, successText(data));
+}
 
 window.setInterval(async () => {
   if (fields.disabled) return;

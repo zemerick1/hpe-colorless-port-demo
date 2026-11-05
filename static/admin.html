@@ -12,7 +12,10 @@
   <header class="top">
     <div>
       <p class="eyebrow">Single demo</p>
-      <h1>Admin</h1>
+      <div class="title-line">
+        <h1>Admin</h1>
+        <button type="button" class="button secondary" id="open-faq">FAQ</button>
+      </div>
     </div>
     <a class="button" href="/">Faceplate</a>
   </header>
@@ -66,10 +69,24 @@
           <summary>Juniper/Mist</summary>
           <div class="group-body">
             <section class="card nested">
+              <details data-section="ex-source" open>
+                <summary>EX polling</summary>
+                <div class="card-body">
+                  <p class="help">The EX faceplate polls one source. Pick Mist or Junos, then Save. Both sets of details can stay filled in. Only the selected source is polled.</p>
+                  <div class="checks">
+                    <label class="check"><input type="radio" name="ex-source" id="ex-source-mist" value="mist"> Mist</label>
+                    <label class="check"><input type="radio" name="ex-source" id="ex-source-junos" value="junos"> Junos</label>
+                  </div>
+                  <p class="status-line" id="ex-source-status"></p>
+                </div>
+              </details>
+            </section>
+
+            <section class="card nested">
               <details data-section="mist">
                 <summary>Mist</summary>
                 <div class="card-body">
-                  <p class="help">API token for the EX faceplate. Mist sends it on each request. Create one in the Mist UI. The token is required for that faceplate. The AOS-CX faceplate does not call Mist, and this demo does not open a Junos session.</p>
+                  <p class="help">API token for Mist polling. Mist sends it on each request. Create one in the Mist UI. Choose Mist under EX polling and Save to use it. The AOS-CX faceplate does not call Mist.</p>
                   <div class="grid">
                     <label>API host <input id="mist-host" type="text" autocomplete="off" placeholder="api.mist.com"></label>
                     <label>API token <input id="mist-token" type="password" autocomplete="new-password"></label>
@@ -86,10 +103,33 @@
             </section>
 
             <section class="card nested">
+              <details data-section="junos">
+                <summary>Junos</summary>
+                <div class="card-body">
+                  <p class="help">Direct Junos REST. The switch must already have <code>system services rest https</code>. The default port is 3443. A blank password on Save keeps the stored password. A session's firewall filter is the access name. Choose Junos under EX polling and Save to poll this switch. Leave the host filled in when you switch back to Mist.</p>
+                  <div class="grid">
+                    <label>Host <input id="junos-host" type="text" autocomplete="off" placeholder="192.168.199.8"></label>
+                    <label>HTTPS port <input id="junos-port" type="number" min="1" max="65535" value="3443"></label>
+                    <label>Username <input id="junos-username" type="text" autocomplete="off"></label>
+                    <label>Password <input id="junos-password" type="password" autocomplete="new-password"></label>
+                  </div>
+                  <div class="checks">
+                    <label class="check"><input id="junos-verify" type="checkbox"> Verify TLS certificate</label>
+                  </div>
+                  <div class="test-row">
+                    <button type="button" class="secondary" id="test-junos">Test Junos</button>
+                    <p class="test-result" id="test-junos-result"></p>
+                  </div>
+                  <p class="status-line" id="junos-status"></p>
+                </div>
+              </details>
+            </section>
+
+            <section class="card nested">
               <details data-section="ex">
                 <summary>EX switch</summary>
                 <div class="card-body">
-                  <p class="help">Juniper EX4000 through Mist only. Enter the Mist site and the switch MAC. The API token is in the Mist section above. Ports 0–11 (<code>ge-0/0/0</code>–<code>ge-0/0/11</code>, or <code>mge-</code> on the 12MP) light from the Mist role when a client has one, and from the port profile otherwise. SFP, management, and console stay dark. A link with no client stays dark. See SUPPORT.md.</p>
+                  <p class="help">Juniper EX4000 through Mist. Enter the Mist site and the switch MAC. The API token is in the Mist section. Choose Mist under EX polling and Save to poll this switch. Ports 0–11 (<code>ge-0/0/0</code>–<code>ge-0/0/11</code>, or <code>mge-</code> on the 12MP) light from the Mist role when a client has one, and from the port profile otherwise. SFP, management, and console stay dark. A link with no client stays dark. See SUPPORT.md.</p>
                   <div class="grid">
                     <label>Mist site ID <input id="ex-site-id" type="text" autocomplete="off" placeholder="site UUID"></label>
                     <label>Switch MAC <input id="ex-switch-mac" type="text" autocomplete="off" placeholder="aa:bb:cc:dd:ee:ff"></label>
@@ -118,9 +158,14 @@
               <details data-section="mist-roles">
                 <summary>Roles</summary>
                 <div class="card-body">
-                  <p class="help">EX faceplate only. These are the radius-group roles from the Mist switch template, such as <code>EMPLOYEE</code> and <code>IOT</code>. The name must match the role Mist applies to the client. A client with a role lights that color. A client with no role keeps the port profile color. A role that is not listed yet still lights gray. Legend order 0 hides it from the legend. AOS-CX does not use this list.</p>
+                  <p class="help">EX faceplate only. On Mist this name is a radius-group role. On Junos it is the ethernet-switching firewall filter on the session, and Mist pushes that filter only after the role is applied to a Switch Policy. A role left off every Switch Policy never reaches the switch. A client with a name lights that color. A Mist client with no role keeps the port profile color. Junos has no port profile. A name that is not listed yet still lights gray. Legend order 0 hides it from the legend. AOS-CX does not use this list. Load fills this form. Save keeps it.</p>
                   <div id="mist-roles"></div>
-                  <button type="button" class="secondary" id="add-mist-role">Add role</button>
+                  <div class="test-row">
+                    <button type="button" class="secondary" id="add-mist-role">Add role</button>
+                    <button type="button" class="secondary" id="load-junos-roles">Load from Junos</button>
+                    <button type="button" class="secondary" id="load-mist-roles">Load from Mist template</button>
+                    <p class="test-result" id="load-roles-result"></p>
+                  </div>
                 </div>
               </details>
             </section>
@@ -172,6 +217,25 @@
       <p class="form-msg" id="form-msg"></p>
     </div>
   </form>
+  <dialog id="faq" aria-labelledby="faq-title">
+    <div class="faq-head">
+      <h2 id="faq-title">Roles and firewall filters</h2>
+      <form method="dialog"><button class="secondary" value="close">Close</button></form>
+    </div>
+    <div class="faq-body">
+      <p>AOS-CX has a port-access role. The jack color on that faceplate is the role the switch applied. That faceplate still reads the switch directly.</p>
+      <p>Junos has no role object. Mist does. Mist pushes an ethernet-switching firewall filter with the role's name only after that role is applied to a Switch Policy. In Mist, that firewall filter is the Switch Policy. A role that is not on a Switch Policy is never pushed, so the filter and the role never appear on the Junos device. When the policy is applied, the switch has a filter of that name:</p>
+      <pre><code>firewall {
+    family ethernet-switching {
+        filter EMPLOYEE { ... }
+        filter IOT { ... }
+    }
+}</code></pre>
+      <p>On the EX faceplate the label follows the live source. Mist says Role. Direct Junos says Firewall filter. The name and the color come from the same list.</p>
+      <p>A port profile is Mist's port usage, for example <code>dot1x-only</code>. It colors a Mist client only when no role was applied. The Junos path does not use port profiles.</p>
+      <p>Under Juniper/Mist, EX polling chooses Mist or Junos. Save applies that choice. Both can stay filled in. The faceplate polls only the one you chose.</p>
+    </div>
+  </dialog>
   <script src="/static/admin.js"></script>
 </body>
 </html>

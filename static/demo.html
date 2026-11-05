@@ -17,7 +17,10 @@
       <span class="dot" id="status-dot"></span>
       <span id="status-text">Loading</span>
     </div>
-    <a class="button" href="/admin">Admin</a>
+    <div class="top-actions">
+      <button type="button" class="button secondary" id="open-faq">FAQ</button>
+      <a class="button" href="/admin">Admin</a>
+    </div>
   </header>
   <p class="banner" id="banner" hidden></p>
   <div class="platform-switch">
@@ -65,6 +68,25 @@
       <p class="hint" id="legend-hint">Ports 1–12 light from the access role. Click a lit port to pin its details. The 1G, SFP, and management ports on the right stay dark.</p>
     </section>
   </main>
+  <dialog id="faq" aria-labelledby="faq-title">
+    <div class="faq-head">
+      <h2 id="faq-title">Roles and firewall filters</h2>
+      <form method="dialog"><button class="secondary" value="close">Close</button></form>
+    </div>
+    <div class="faq-body">
+      <p>AOS-CX has a port-access role. The jack color on that faceplate is the role the switch applied. That faceplate still reads the switch directly.</p>
+      <p>Junos has no role object. Mist does. Mist pushes an ethernet-switching firewall filter with the role's name only after that role is applied to a Switch Policy. In Mist, that firewall filter is the Switch Policy. A role that is not on a Switch Policy is never pushed, so the filter and the role never appear on the Junos device. When the policy is applied, the switch has a filter of that name:</p>
+      <pre><code>firewall {
+    family ethernet-switching {
+        filter EMPLOYEE { ... }
+        filter IOT { ... }
+    }
+}</code></pre>
+      <p>On the EX faceplate the label follows the live source. Mist says Role. Direct Junos says Firewall filter. The name and the color come from the same list.</p>
+      <p>A port profile is Mist's port usage, for example <code>dot1x-only</code>. It colors a Mist client only when no role was applied. The Junos path does not use port profiles.</p>
+      <p>Under Juniper/Mist, EX polling chooses Mist or Junos. Save applies that choice. Both can stay filled in. The faceplate polls only the one you chose.</p>
+    </div>
+  </dialog>
   <script src="/static/demo.js"></script>
 </body>
 </html>

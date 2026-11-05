@@ -11,7 +11,9 @@ from datetime import datetime, timezone
 from app.aoscx import AoscxError, AoscxSession, RawClient, RawPort, SwitchTarget, normalize_switch_host
 from app.clearpass import ClearPassError, ClearPassSession, ClearPassTarget, EndpointInfo
 from app.db import get_settings
+from app.junos import JunosError, JunosSession, JunosTarget
 from app.mist import MistError, MistSession, MistTarget
+from app.translate import mark_mist, ports_from_junos
 
 logger = logging.getLogger("colorless.poll")
 
@@ -53,6 +55,9 @@ class Poller:
         self.clearpass_fp: tuple | None = None
         self.mist: MistSession | None = None
         self.mist_fp: tuple | None = None
+        self.junos: JunosSession | None = None
+        self.junos_fp: tuple | None = None
+        self._ex_source = ""
         self._logged = ""
         self._ex_logged = ""
 
@@ -66,6 +71,9 @@ class Poller:
         if self.mist is not None:
             await self.mist.close()
             self.mist = None
+        if self.junos is not None:
+            await self.junos.close()
+            self.junos = None
 
     async def run(self) -> None:
         stop: asyncio.Event = self.app.state.stop
@@ -74,14 +82,13 @@ class Poller:
             interval = float(settings["poll_interval_sec"])
             watching = viewer_is_active(self.app.state.last_view, interval)
             cx_on = bool(settings["switch_host"])
-            ex_on = bool(
-                settings.get("ex_site_id") and settings.get("ex_switch_mac") and settings.get("mist_api_token")
-            )
+            source = ex_source(settings)
             if not cx_on:
                 await self._clear_cx()
-            if not ex_on:
+            if not source:
                 await self._clear_ex()
-            if not watching or not (cx_on or ex_on):
+                self._ex_source = ""
+            if not watching or not (cx_on or source):
                 await sleep_or_wake(self.app.state.wake, 1)
                 continue
             if cx_on:
@@ -94,17 +101,54 @@ class Poller:
                 except Exception:
                     logger.warning("switch poll failed")
                     self._fail("Poll failed")
-            if ex_on:
+            if source:
                 try:
-                    await self.poll_ex(settings)
+                    await self.poll_active_ex(settings)
                 except asyncio.CancelledError:
                     raise
-                except MistError as exc:
+                except (MistError, JunosError) as exc:
                     self._fail_ex(str(exc))
                 except Exception:
-                    logger.warning("mist poll failed")
-                    self._fail_ex("Mist poll failed")
+                    logger.warning("ex poll failed")
+                    self._fail_ex("EX poll failed")
             await sleep_or_wake(self.app.state.wake, interval)
+
+    async def poll_active_ex(self, settings: dict) -> None:
+        source = ex_source(settings)
+        if source != self._ex_source:
+            self._reset_ex_view()
+            self._ex_source = source
+        if source == "junos":
+            await self._close_mist()
+            await self.poll_junos(settings)
+            return
+        if source == "mist":
+            await self._close_junos()
+            await self.poll_ex(settings)
+
+    async def poll_junos(self, settings: dict) -> None:
+        fingerprint = (
+            settings.get("junos_host") or "",
+            int(settings.get("junos_port") or 3443),
+            settings.get("junos_username") or "",
+            settings.get("junos_password") or "",
+            bool(settings.get("junos_verify_tls")),
+        )
+        if self.junos is None or fingerprint != self.junos_fp:
+            if self.junos is not None:
+                await self.junos.close()
+            self.junos = JunosSession(
+                JunosTarget(
+                    host=str(settings.get("junos_host") or ""),
+                    port=int(settings.get("junos_port") or 3443),
+                    username=str(settings.get("junos_username") or ""),
+                    password=str(settings.get("junos_password") or ""),
+                    verify_tls=bool(settings.get("junos_verify_tls")),
+                )
+            )
+            self.junos_fp = fingerprint
+        hostname, version, links, sessions = await self.junos.read_access()
+        self._store_ex(hostname, version, ports_from_junos(links, sessions))
 
     async def poll_ex(self, settings: dict) -> None:
         fingerprint = (
@@ -127,6 +171,9 @@ class Poller:
             settings["ex_site_id"],
             settings["ex_switch_mac"],
         )
+        self._store_ex(hostname, version, mark_mist(ports))
+
+    def _store_ex(self, hostname: str, version: str, ports: list[RawPort]) -> None:
         status: PollStatus = self.app.state.poll
         status.ex_ports = ports
         status.ex_ok = True
@@ -135,8 +182,17 @@ class Poller:
         status.ex_version = version
         status.ex_polled_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         if self._ex_logged:
-            logger.info("mist poll recovered")
+            logger.info("ex poll recovered")
             self._ex_logged = ""
+
+    def _reset_ex_view(self) -> None:
+        status: PollStatus = self.app.state.poll
+        status.ex_ok = False
+        status.ex_error = ""
+        status.ex_ports = None
+        status.ex_hostname = ""
+        status.ex_version = ""
+        status.ex_polled_at = None
 
     async def poll_once(self, settings: dict) -> None:
         fingerprint = (
@@ -254,7 +310,7 @@ class Poller:
         status.ex_ok = False
         status.ex_error = message
         if message != self._ex_logged:
-            logger.warning("mist poll: %s", message)
+            logger.warning("ex poll: %s", message)
             self._ex_logged = message
 
     async def _clear_cx(self) -> None:
@@ -288,6 +344,68 @@ class Poller:
             await self.mist.close()
             self.mist = None
             self.mist_fp = None
+        await self._close_junos()
+
+    async def _close_mist(self) -> None:
+        if self.mist is None:
+            return
+        await self.mist.close()
+        self.mist = None
+        self.mist_fp = None
+
+    async def _close_junos(self) -> None:
+        if self.junos is None:
+            return
+        await self.junos.close()
+        self.junos = None
+        self.junos_fp = None
+
+
+def junos_ready(settings: dict) -> bool:
+    return bool(
+        str(settings.get("junos_host") or "").strip()
+        and str(settings.get("junos_username") or "").strip()
+        and settings.get("junos_password")
+    )
+
+
+def mist_ready(settings: dict) -> bool:
+    return bool(
+        settings.get("ex_site_id")
+        and settings.get("ex_switch_mac")
+        and settings.get("mist_api_token")
+    )
+
+
+def saved_ex_choice(settings: dict) -> str:
+    choice = str(settings.get("ex_source_choice") or "").strip().casefold()
+    if choice in {"mist", "junos"}:
+        return choice
+    return ""
+
+
+def display_ex_choice(settings: dict) -> str:
+    """The radio to show. A saved choice wins. Otherwise show whichever source is ready."""
+    saved = saved_ex_choice(settings)
+    if saved:
+        return saved
+    if junos_ready(settings):
+        return "junos"
+    return "mist"
+
+
+def ex_source(settings: dict) -> str:
+    """The one EX poller. A saved choice stays on that source even when the other is filled in."""
+    choice = saved_ex_choice(settings)
+    if choice == "junos":
+        return "junos" if junos_ready(settings) else ""
+    if choice == "mist":
+        return "mist" if mist_ready(settings) else ""
+    if junos_ready(settings):
+        return "junos"
+    if mist_ready(settings):
+        return "mist"
+    return ""
 
 
 def _cache_fresh(entry: tuple[float, EndpointInfo], now: float) -> bool:

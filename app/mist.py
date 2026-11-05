@@ -52,6 +52,38 @@ def display_mac(value: str) -> str:
     return ":".join(hexes[i : i + 2] for i in range(0, 12, 2))
 
 
+def device_id(mac: str) -> str:
+    """Mist device id. The stats path does not accept a bare chassis MAC."""
+    return f"00000000-0000-0000-1000-{mac}"
+
+
+_ROLE_TAG_TYPES = {"radius_group", "aruba_user_role"}
+
+
+def roles_from_template(template: object) -> list[str]:
+    """Radius-group names on a switch template. Port-usage tags are not roles."""
+    if not isinstance(template, dict):
+        return []
+    tags = template.get("acl_tags")
+    if not isinstance(tags, dict):
+        return []
+    names: list[str] = []
+    seen: set[str] = set()
+    for key, tag in tags.items():
+        if not isinstance(tag, dict):
+            continue
+        kind = str(tag.get("type") or "").strip().casefold().replace("-", "_")
+        if kind not in _ROLE_TAG_TYPES:
+            continue
+        name = str(tag.get("radius_group") or "").strip() or str(key or "").strip()
+        fold = name.casefold()
+        if not name or fold in seen:
+            continue
+        seen.add(fold)
+        names.append(name)
+    return names
+
+
 def copper_index(port_id: str) -> int | None:
     """Map ge-0/0/N and mge-0/0/N, N in 0..11, onto the EX4000 copper jacks.
 
@@ -311,8 +343,36 @@ class MistSession:
         )
         return hostname or display_mac(mac), version, ports_from_mist(port_rows, client_rows)
 
+    async def switch_template_roles(self, site_id: str) -> tuple[str, list[str]]:
+        """Role names from the switch template assigned to this site."""
+        if not self.target.api_token:
+            raise MistError("Mist API token is required")
+        site = site_id.strip()
+        if not site:
+            raise MistError("Enter a Mist site ID")
+        _status, body = await self._get(f"/api/v1/sites/{site}")
+        if not isinstance(body, dict):
+            raise MistError("Mist did not return the site")
+        org_id = _text(body.get("org_id"))
+        template_id = _text(body.get("networktemplate_id"))
+        if not template_id:
+            raise MistError("This site has no switch template")
+        if not org_id:
+            raise MistError("Mist did not return the site organization")
+        _status, template = await self._get(f"/api/v1/orgs/{org_id}/networktemplates/{template_id}")
+        if not isinstance(template, dict):
+            raise MistError("Mist did not return the switch template")
+        names = roles_from_template(template)
+        if not names:
+            raise MistError("This switch template has no radius-group roles. Port profiles are not roles.")
+        title = _text(template.get("name")) or template_id
+        return title, names
+
     async def _device(self, site: str, mac: str) -> tuple[str, str]:
-        status, body = await self._get(f"/api/v1/sites/{site}/stats/devices/{mac}", missing_ok=True)
+        status, body = await self._get(
+            f"/api/v1/sites/{site}/stats/devices/{device_id(mac)}",
+            missing_ok=True,
+        )
         if status == 404 or not isinstance(body, dict):
             return "", ""
         hostname = _text(body.get("hostname")) or _text(body.get("name"))
