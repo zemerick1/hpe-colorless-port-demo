@@ -362,6 +362,53 @@ def test_ex_mist_role_colors_the_jack_ahead_of_the_port_profile():
     assert ("role", "IoT") in kinds
     assert ("role", "CAMERA") in kinds
     assert ("profile", "802.1X only") in kinds
+    assert employee["clients"][0]["access_label"] == "Role"
+
+
+def test_junos_filter_uses_the_same_color_and_a_session_without_one_stays_gray():
+    mist_roles = [
+        {
+            "id": 1,
+            "name": "EMPLOYEE",
+            "display_name": "Employee",
+            "description": "Staff access.",
+            "port_color": "#FF8300",
+            "legend_order": 1,
+            "no_popover": False,
+        },
+    ]
+    profiles = [
+        {
+            "id": 3,
+            "name": "dot1x-only",
+            "display_name": "802.1X only",
+            "description": "Wired 802.1X.",
+            "port_color": "#307AF2",
+            "legend_order": 1,
+            "no_popover": False,
+        }
+    ]
+    ports = [
+        RawPort(0, "ge-0/0/0", "up", "", [
+            RawClient("aa:bb:cc:dd:ee:01", "user", "dot1x", "", "", "", "20", "Bridged", "", mist_role="EMPLOYEE", access_kind="filter"),
+        ]),
+        RawPort(1, "ge-0/0/1", "up", "", [
+            RawClient("aa:bb:cc:dd:ee:02", "user", "dot1x", "dot1x-only", "", "", "", "Bridged", "", access_kind="filter"),
+        ]),
+    ]
+    snap = build_snapshot(
+        ports, SETTINGS, ROLES, {"configured": True, "source": "junos"},
+        platform="ex", profiles=profiles, mist_roles=mist_roles,
+    )
+    employee = snap["ports"][0]["clients"][0]
+    assert snap["ports"][0]["color"] == "#FF8300"
+    assert employee["access_label"] == "Firewall filter"
+    assert employee["mist_role_label"] == "Employee"
+    assert employee["role_label"] == ""
+    bare = snap["ports"][1]
+    assert bare["color"] == "#888888"
+    assert bare["clients"][0]["mist_role_description"] == "No firewall filter is applied to this session."
+    assert bare["clients"][0]["access_label"] == "Firewall filter"
 
 
 def test_link_down_and_hidden_port_up_have_no_lamp_when_visualize_is_off():

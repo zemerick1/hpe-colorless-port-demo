@@ -65,6 +65,12 @@ SETTING_DEFAULTS = {
     "mist_verify_tls": 1,
     "ex_site_id": "",
     "ex_switch_mac": "",
+    "junos_host": "",
+    "junos_port": 3443,
+    "junos_username": "",
+    "junos_password": "",
+    "junos_verify_tls": 0,
+    "ex_source_choice": "",
     "poll_interval_sec": 1.0,
     "screen_interval_sec": 0.5,
     "show_device_name_on_mac": 1,
@@ -178,6 +184,7 @@ def init_db(path: Path) -> None:
             """
         )
         _ensure_ex_columns(conn)
+        _ensure_junos_columns(conn)
         row = conn.execute("SELECT id FROM settings WHERE id = 1").fetchone()
         if row is None:
             conn.execute("INSERT INTO settings (id) VALUES (1)")
@@ -200,6 +207,87 @@ def _ensure_ex_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE settings ADD COLUMN ex_site_id TEXT NOT NULL DEFAULT ''")
     if "ex_switch_mac" not in have:
         conn.execute("ALTER TABLE settings ADD COLUMN ex_switch_mac TEXT NOT NULL DEFAULT ''")
+
+
+def _ensure_junos_columns(conn: sqlite3.Connection) -> None:
+    have = {row["name"] for row in conn.execute("PRAGMA table_info(settings)")}
+    adds = (
+        ("junos_host", "TEXT NOT NULL DEFAULT ''"),
+        ("junos_port", "INTEGER NOT NULL DEFAULT 3443"),
+        ("junos_username", "TEXT NOT NULL DEFAULT ''"),
+        ("junos_password", "TEXT NOT NULL DEFAULT ''"),
+        ("junos_verify_tls", "INTEGER NOT NULL DEFAULT 0"),
+        ("ex_source_choice", "TEXT NOT NULL DEFAULT ''"),
+    )
+    for name, declaration in adds:
+        if name not in have:
+            conn.execute(f"ALTER TABLE settings ADD COLUMN {name} {declaration}")
+
+
+LOAD_PALETTE = (
+    "#FF8300",
+    "#99DAF8",
+    "#26F263",
+    "#D5D654",
+    "#307AF2",
+    "#E702F7",
+    "#888888",
+    "#C46B4A",
+)
+
+
+def merge_named_colors(existing: list[dict], names: list[str], description: str) -> dict:
+    """Append names that are not already on the list. Keep colors already chosen."""
+    kept: list[dict] = []
+    by_fold: dict[str, dict] = {}
+    for raw in existing:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or "").strip()
+        if not name:
+            continue
+        fold = name.casefold()
+        if fold in by_fold:
+            continue
+        row = dict(raw)
+        row["name"] = name
+        kept.append(row)
+        by_fold[fold] = row
+    used = {str(row.get("port_color") or "").casefold() for row in kept if row.get("port_color")}
+    orders = [int(row.get("legend_order") or 0) for row in kept]
+    next_order = (max(orders) if orders else 0) + 1
+    unused = [color for color in LOAD_PALETTE if color.casefold() not in used]
+    added: list[str] = []
+    present: list[str] = []
+    fallback = 0
+    for raw_name in names:
+        name = str(raw_name or "").strip()
+        if not name:
+            continue
+        fold = name.casefold()
+        if fold in by_fold:
+            present.append(str(by_fold[fold].get("name") or name))
+            continue
+        if unused:
+            color = unused.pop(0)
+        else:
+            color = LOAD_PALETTE[fallback % len(LOAD_PALETTE)]
+            fallback += 1
+        used.add(color.casefold())
+        row = {
+            "id": None,
+            "name": name,
+            "display_name": "",
+            "description": description,
+            "port_color": color,
+            "legend_order": next_order,
+            "no_popover": False,
+        }
+        next_order += 1
+        kept.append(row)
+        by_fold[fold] = row
+        added.append(name)
+    return {"roles": kept, "added": added, "present": present}
 
 
 def _assign_seed_specials(conn: sqlite3.Connection) -> None:
@@ -227,6 +315,7 @@ def get_settings(path: Path) -> dict:
         "switch_verify_tls",
         "clearpass_verify_tls",
         "mist_verify_tls",
+        "junos_verify_tls",
         "show_device_name_on_mac",
         "visualize_unknown",
         "hide_previous_popovers",
@@ -310,6 +399,12 @@ def public_config(path: Path) -> dict:
         "mist_verify_tls": settings["mist_verify_tls"],
         "ex_site_id": settings.get("ex_site_id") or "",
         "ex_switch_mac": settings.get("ex_switch_mac") or "",
+        "junos_host": settings.get("junos_host") or "",
+        "junos_port": int(settings.get("junos_port") or 3443),
+        "junos_username": settings.get("junos_username") or "",
+        "junos_password_set": bool(settings.get("junos_password")),
+        "junos_verify_tls": settings.get("junos_verify_tls"),
+        "ex_source_choice": settings.get("ex_source_choice") or "",
         "poll_interval_sec": settings["poll_interval_sec"],
         "screen_interval_sec": settings["screen_interval_sec"],
         "show_device_name_on_mac": settings["show_device_name_on_mac"],
@@ -364,6 +459,12 @@ def save_config(path: Path, payload: dict) -> dict:
     mist_token = str(payload.get("mist_api_token") or "")
     if not mist_token:
         mist_token = current["mist_api_token"]
+    junos_host = _clean_text(payload.get("junos_host"), "Junos host", 255)
+    junos_port = int(_require_number(payload.get("junos_port", 3443), "Junos port", 1, 65535))
+    junos_username = _clean_text(payload.get("junos_username"), "Junos username", 64)
+    junos_password = str(payload.get("junos_password") or "")
+    if not junos_password:
+        junos_password = current.get("junos_password") or ""
 
     if switch_host and not switch_username:
         raise ValueError("Switch username is required")
@@ -383,6 +484,13 @@ def save_config(path: Path, payload: dict) -> dict:
         raise ValueError("EX site ID must be a UUID")
     if ex_site_id and not mist_token:
         raise ValueError("Mist API token is required for the EX switch")
+    if junos_host and not junos_username:
+        raise ValueError("Junos username is required")
+    if junos_host and not junos_password:
+        raise ValueError("Junos password is required")
+    ex_source_choice = str(payload.get("ex_source_choice") or "").strip().casefold()
+    if ex_source_choice not in {"", "mist", "junos"}:
+        raise ValueError("EX polling must be Mist or Junos")
 
     roles_in = payload.get("roles")
     if not isinstance(roles_in, list) or not roles_in:
@@ -495,7 +603,9 @@ def save_config(path: Path, payload: dict) -> dict:
                 clearpass_host = ?, clearpass_client_id = ?, clearpass_client_secret = ?,
                 clearpass_verify_tls = ?,
                 mist_host = ?, mist_api_token = ?, mist_verify_tls = ?,
-                ex_site_id = ?, ex_switch_mac = ?,
+                ex_site_id = ?, ex_switch_mac = ?, ex_source_choice = ?,
+                junos_host = ?, junos_port = ?, junos_username = ?, junos_password = ?,
+                junos_verify_tls = ?,
                 poll_interval_sec = ?, screen_interval_sec = ?,
                 show_device_name_on_mac = ?, visualize_unknown = ?, hide_previous_popovers = ?,
                 port_up_role_id = ?, port_down_role_id = ?, multiple_roles_role_id = ?
@@ -518,6 +628,12 @@ def save_config(path: Path, payload: dict) -> dict:
                 1 if payload.get("mist_verify_tls", True) else 0,
                 ex_site_id,
                 ex_switch_mac,
+                ex_source_choice,
+                junos_host,
+                junos_port,
+                junos_username,
+                junos_password,
+                1 if payload.get("junos_verify_tls") else 0,
                 poll_interval,
                 screen_interval,
                 1 if payload.get("show_device_name_on_mac", True) else 0,

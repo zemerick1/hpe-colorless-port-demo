@@ -21,13 +21,19 @@ from app.db import (
     get_profiles,
     get_settings,
     init_db,
+    merge_named_colors,
     public_config,
     resolve_secret,
     save_config,
 )
+from app.junos import JunosError, JunosSession, JunosTarget
 from app.mist import MistError, MistSession, MistTarget, check_mist
-from app.poller import PollStatus, Poller, viewer_is_active
+from app.poller import PollStatus, Poller, display_ex_choice, ex_source, viewer_is_active
 from app.snapshot import build_snapshot
+from app.translate import mark_mist, ports_from_junos
+
+JUNOS_FILTER_NOTE = "Ethernet-switching firewall filter on the switch."
+MIST_TEMPLATE_NOTE = "Radius-group role on the Mist switch template."
 
 logger = logging.getLogger("colorless")
 STATIC = Path(__file__).resolve().parents[1] / "static"
@@ -71,6 +77,12 @@ class ConfigIn(BaseModel):
     mist_verify_tls: bool = True
     ex_site_id: str = ""
     ex_switch_mac: str = ""
+    junos_host: str = ""
+    junos_port: int = 3443
+    junos_username: str = ""
+    junos_password: str = ""
+    junos_verify_tls: bool = False
+    ex_source_choice: str = ""
     poll_interval_sec: float = 1
     screen_interval_sec: float = 0.5
     show_device_name_on_mac: bool = True
@@ -110,6 +122,26 @@ class ExTestIn(BaseModel):
     mist_verify_tls: bool = True
     ex_site_id: str = ""
     ex_switch_mac: str = ""
+
+
+class JunosTestIn(BaseModel):
+    junos_host: str = ""
+    junos_port: int = 3443
+    junos_username: str = ""
+    junos_password: str = ""
+    junos_verify_tls: bool = False
+
+
+class JunosLoadIn(JunosTestIn):
+    mist_roles: list[ProfileIn] = Field(default_factory=list)
+
+
+class MistTemplateLoadIn(BaseModel):
+    mist_host: str = "api.mist.com"
+    mist_api_token: str = ""
+    mist_verify_tls: bool = True
+    ex_site_id: str = ""
+    mist_roles: list[ProfileIn] = Field(default_factory=list)
 
 
 def create_app(db_path=None) -> FastAPI:
@@ -190,7 +222,9 @@ def create_app(db_path=None) -> FastAPI:
     @app.get("/api/admin/config")
     def admin_get() -> dict:
         settings = get_settings(path)
-        return {**public_config(path), "poll": _poll_view(app, settings)}
+        config = public_config(path)
+        config["ex_source_choice"] = display_ex_choice(settings)
+        return {**config, "poll": _poll_view(app, settings)}
 
     @app.put("/api/admin/config")
     def admin_put(body: ConfigIn) -> dict:
@@ -200,6 +234,7 @@ def create_app(db_path=None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         app.state.wake.set()
         settings = get_settings(path)
+        saved["ex_source_choice"] = display_ex_choice(settings)
         return {**saved, "poll": _poll_view(app, settings)}
 
     @app.post("/api/admin/test/switch")
@@ -274,6 +309,7 @@ def create_app(db_path=None) -> FastAPI:
         session = MistSession(target)
         try:
             hostname, version, ports = await session.poll_access_ports(site, mac)
+            ports = mark_mist(ports)
         except MistError as exc:
             return {"ok": False, "error": str(exc)}
         finally:
@@ -296,6 +332,84 @@ def create_app(db_path=None) -> FastAPI:
             "ports_up": up,
             "clients": clients,
         }
+
+    @app.post("/api/admin/test/junos")
+    async def test_junos(body: JunosTestIn) -> dict:
+        try:
+            target = _junos_target(path, body)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        session = JunosSession(target)
+        try:
+            hostname, version, links, sessions = await session.read_access()
+        except JunosError as exc:
+            return {"ok": False, "error": str(exc)}
+        finally:
+            await session.close()
+        ports = ports_from_junos(links, sessions)
+        status: PollStatus = app.state.poll
+        status.ex_ports = ports
+        status.ex_ok = True
+        status.ex_error = ""
+        status.ex_hostname = hostname
+        status.ex_version = version
+        from datetime import datetime, timezone
+
+        status.ex_polled_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        clients = sum(len(port.clients) for port in ports)
+        up = sum(1 for port in ports if port.status == "up")
+        return {
+            "ok": True,
+            "hostname": hostname,
+            "software_version": version,
+            "ports_up": up,
+            "clients": clients,
+        }
+
+    @app.post("/api/admin/roles/junos")
+    async def load_junos_roles(body: JunosLoadIn) -> dict:
+        try:
+            target = _junos_target(path, body)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        session = JunosSession(target)
+        try:
+            names = await session.filter_names()
+        except JunosError as exc:
+            return {"ok": False, "error": str(exc)}
+        finally:
+            await session.close()
+        if not names:
+            return {"ok": False, "error": "Junos has no ethernet-switching filters"}
+        merged = merge_named_colors(
+            [role.model_dump() for role in body.mist_roles],
+            names,
+            JUNOS_FILTER_NOTE,
+        )
+        return {"ok": True, **merged}
+
+    @app.post("/api/admin/roles/mist-template")
+    async def load_mist_template_roles(body: MistTemplateLoadIn) -> dict:
+        try:
+            target = _mist_target(path, body)
+            site = body.ex_site_id.strip()
+            if not site:
+                raise ValueError("Enter a Mist site ID")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        session = MistSession(target)
+        try:
+            title, names = await session.switch_template_roles(site)
+        except MistError as exc:
+            return {"ok": False, "error": str(exc)}
+        finally:
+            await session.close()
+        merged = merge_named_colors(
+            [role.model_dump() for role in body.mist_roles],
+            names,
+            MIST_TEMPLATE_NOTE,
+        )
+        return {"ok": True, "template": title, **merged}
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
     return app
@@ -340,11 +454,11 @@ def _cx_poll_view(app: FastAPI, settings: dict) -> dict:
 
 def _ex_poll_view(app: FastAPI, settings: dict) -> dict:
     poll: PollStatus = app.state.poll
-    configured = bool(
-        settings.get("ex_site_id") and settings.get("ex_switch_mac") and settings.get("mist_api_token")
-    )
+    source = ex_source(settings)
     return {
-        "configured": configured,
+        "configured": bool(source),
+        "source": source,
+        "choice": display_ex_choice(settings),
         "ok": poll.ex_ok,
         "error": poll.ex_error,
         "polled_at": poll.ex_polled_at,
@@ -411,6 +525,28 @@ def _mist_target(path: Path, body: MistTestIn) -> MistTarget:
         raise ValueError("Enter the Mist API token")
     host = body.mist_host.strip() or "api.mist.com"
     return MistTarget(host=host, api_token=token, verify_tls=body.mist_verify_tls)
+
+
+def _junos_target(path: Path, body: JunosTestIn) -> JunosTarget:
+    host = body.junos_host.strip()
+    if not host:
+        raise ValueError("Enter a Junos host")
+    username = body.junos_username.strip()
+    if not username:
+        raise ValueError("Enter the Junos username")
+    password = resolve_secret(path, "junos_password", body.junos_password)
+    if not password:
+        raise ValueError("Enter the Junos password")
+    port = int(body.junos_port or 3443)
+    if port < 1 or port > 65535:
+        raise ValueError("Junos port is invalid")
+    return JunosTarget(
+        host=host,
+        port=port,
+        username=username,
+        password=password,
+        verify_tls=body.junos_verify_tls,
+    )
 
 
 app = create_app()

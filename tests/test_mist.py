@@ -1,10 +1,10 @@
-"""Mist is the only source for the EX faceplate. Junos is not called."""
+"""Mist wired-client parsing. Junos is a separate EX source."""
 
 import asyncio
 
 import httpx
 
-from app.mist import MistSession, MistTarget, copper_index, ports_from_mist
+from app.mist import MistSession, MistTarget, copper_index, ports_from_mist, roles_from_template
 
 
 def test_copper_index_keeps_member_zero_access_ports():
@@ -79,7 +79,7 @@ def test_poll_reads_device_ports_and_wired_clients_without_putting_the_token_in_
         assert request.headers["authorization"] == "Token secret"
         assert "secret" not in str(request.url)
         path = request.url.path
-        if path.endswith("/stats/devices/001122334455"):
+        if path.endswith("/stats/devices/00000000-0000-0000-1000-001122334455"):
             return httpx.Response(
                 200,
                 json={"hostname": "lab-ex", "model": "EX4000-12MP", "version": "24.4R1"},
@@ -148,3 +148,16 @@ def test_poll_reads_device_ports_and_wired_clients_without_putting_the_token_in_
     assert port.clients[0].vlan == "100"
     assert port.clients[0].auth_method == "mac-auth"
     assert all(item.name != "xe-0/1/2" for item in ports)
+
+
+def test_switch_template_keeps_radius_groups_and_drops_port_usage():
+    names = roles_from_template({
+        "name": "access",
+        "acl_tags": {
+            "EMPLOYEE": {"type": "radius_group", "radius_group": "EMPLOYEE"},
+            "iot_tag": {"type": "aruba_user_role", "radius_group": "IOT"},
+            "wired": {"type": "port_usage", "port_usage": "dot1x-only"},
+            "guest": {"type": "subnet", "subnets": ["10.0.0.0/8"]},
+        },
+    })
+    assert names == ["EMPLOYEE", "IOT"]

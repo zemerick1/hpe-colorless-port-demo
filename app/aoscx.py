@@ -53,6 +53,7 @@ class RawClient:
     device_category: str = ""
     device_family: str = ""
     mist_role: str = ""
+    access_kind: str = ""
 
 
 @dataclass
