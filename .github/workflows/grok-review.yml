@@ -43,6 +43,11 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "$HOME/.grok/bin" >> "$GITHUB_PATH"
 
+      - name: Prepare diff
+        run: |
+          git diff "origin/${{ github.base_ref }}...HEAD" > .grok-pr.diff
+          git log --format='%h %s' "origin/${{ github.base_ref }}..HEAD" > .grok-pr-commits.txt
+
       - name: Review PR
         env:
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
@@ -50,12 +55,14 @@ jobs:
           GITHUB_TOKEN: ""
           GROK_REVIEW_PROMPT: |
             You are reviewing pull request #${{ github.event.pull_request.number }} on ${{ github.repository }}.
-            The base ref is origin/${{ github.base_ref }}. Read the change with git diff and the files it touches.
+            The commits are in .grok-pr-commits.txt. The full diff against origin/${{ github.base_ref }} is in .grok-pr.diff.
+            Read those files. Read source files when the diff is not enough to judge a change.
             Review for bugs, regressions, and missing tests. Be specific. Do not rubber-stamp the change.
-            Write the full review, and only the review, to .grok-review.md in the repo root.
+            Write the full review to .grok-review.md, and make that same review your final message.
             Say what you checked. Name any bug, regression, or missing test that should block merge, and say where it is.
             Non-blocking notes can follow, clearly marked as non-blocking.
-            Do not approve the pull request. Do not run gh. Do not push, commit, or edit any file other than .grok-review.md.
+            Do not approve the pull request. Do not run git or gh. Git and gh are refused.
+            Do not edit any file other than .grok-review.md.
         run: |
           if [ -z "$XAI_API_KEY" ]; then
             echo "::error::Repo secret XAI_API_KEY is empty. Add an API key from https://console.x.ai"
@@ -63,19 +70,42 @@ jobs:
           fi
           grok --version
           : > .grok-review.md
+          set +e
           grok -p "$GROK_REVIEW_PROMPT" \
             --permission-mode dontAsk \
+            --max-turns 20 \
+            --no-subagents \
+            --disable-web-search \
+            --output-format streaming-messages-json \
             --allow 'Read' \
             --allow 'Grep' \
-            --allow 'Bash(git diff *)' \
-            --allow 'Bash(git log *)' \
-            --allow 'Bash(git show *)' \
-            --allow 'Bash(git status)' \
             --allow 'Edit(.grok-review.md)' \
+            --deny 'Bash(git *)' \
             --deny 'Bash(gh *)' \
-            --deny 'Bash(git push *)' \
-            --deny 'Bash(git commit *)' \
-            --deny 'Bash(git add *)'
+            > .grok-review.json
+          set -e
+          python3 - <<'PY'
+          import json
+          import pathlib
+          written = pathlib.Path(".grok-review.md").read_text(encoding="utf-8").strip()
+          final = ""
+          log = pathlib.Path(".grok-review.json")
+          if log.exists():
+              for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
+                  line = line.strip()
+                  if not line:
+                      continue
+                  try:
+                      event = json.loads(line)
+                  except json.JSONDecodeError:
+                      continue
+                  if event.get("type") == "result" and event.get("result"):
+                      final = str(event["result"]).strip()
+          body = written or final
+          if not body:
+              raise SystemExit("Grok did not produce a review")
+          pathlib.Path(".grok-review.md").write_text(body + "\n", encoding="utf-8")
+          PY
 
       - name: Post review as a PR comment
         env:
