@@ -3,7 +3,3 @@ __pycache__/
 .pytest_cache/
 data/
 *.db
-.grok-review.md
-.grok-review.json
-.grok-pr.diff
-.grok-pr-commits.txt
