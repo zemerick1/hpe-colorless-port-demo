@@ -1,0 +1,90 @@
+# AI review on pull requests via the Grok CLI.
+#
+# Repository secret required:
+#   XAI_API_KEY  — API key from https://console.x.ai
+#
+# This workflow posts the review as a pull request comment. It never
+# approves the pull request. Grok runs without always-approve: dontAsk
+# plus the allow rules below are the only tools it can use, and the
+# GitHub token is withheld until the comment step.
+
+name: grok-review
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+concurrency:
+  group: grok-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Fetch base branch
+        run: git fetch origin "${{ github.base_ref }}"
+
+      - name: Install Grok CLI
+        run: |
+          curl -fsSL https://x.ai/cli/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.grok/bin" >> "$GITHUB_PATH"
+
+      - name: Review PR
+        env:
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          GH_TOKEN: ""
+          GITHUB_TOKEN: ""
+          GROK_REVIEW_PROMPT: |
+            You are reviewing pull request #${{ github.event.pull_request.number }} on ${{ github.repository }}.
+            The base ref is origin/${{ github.base_ref }}. Read the change with git diff and the files it touches.
+            Review for bugs, regressions, and missing tests. Be specific. Do not rubber-stamp the change.
+            Write the full review, and only the review, to .grok-review.md in the repo root.
+            Say what you checked. Name any bug, regression, or missing test that should block merge, and say where it is.
+            Non-blocking notes can follow, clearly marked as non-blocking.
+            Do not approve the pull request. Do not run gh. Do not push, commit, or edit any file other than .grok-review.md.
+        run: |
+          if [ -z "$XAI_API_KEY" ]; then
+            echo "::error::Repo secret XAI_API_KEY is empty. Add an API key from https://console.x.ai"
+            exit 1
+          fi
+          grok --version
+          : > .grok-review.md
+          grok -p "$GROK_REVIEW_PROMPT" \
+            --permission-mode dontAsk \
+            --allow 'Read' \
+            --allow 'Grep' \
+            --allow 'Bash(git diff *)' \
+            --allow 'Bash(git log *)' \
+            --allow 'Bash(git show *)' \
+            --allow 'Bash(git status)' \
+            --allow 'Edit(.grok-review.md)' \
+            --deny 'Bash(gh *)' \
+            --deny 'Bash(git push *)' \
+            --deny 'Bash(git commit *)' \
+            --deny 'Bash(git add *)'
+
+      - name: Post review as a PR comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ ! -s .grok-review.md ]; then
+            echo "::error::Grok did not write a review to .grok-review.md"
+            exit 1
+          fi
+          gh pr review "$PR_NUMBER" --comment --body-file .grok-review.md
