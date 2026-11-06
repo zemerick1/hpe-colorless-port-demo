@@ -29,7 +29,8 @@
               <details data-section="switch">
                 <summary>AOS-CX</summary>
                 <div class="card-body">
-                  <p class="help">Direct AOS-CX API. Username and password are exchanged for a session token, and later requests send that token. The faceplate is a 6200F and reads ports 1/1/1 through 1/1/12. ClearPass can add client detail. This faceplate does not call Mist.</p>
+                  <p class="help">Direct AOS-CX API. Username and password are exchanged for a session token, and later requests send that token. ClearPass can add client detail. This faceplate does not call Mist.</p>
+                  <p class="callout" id="supported-models">Supported models: 6200F 12-port and 6300F 24-port (JL666A). The faceplate follows the switch. Other Aruba models stay blank.</p>
                   <div class="grid">
                     <label>Host <input id="switch-host" type="text" autocomplete="off" placeholder="192.168.199.4"></label>
                     <label>HTTPS port <input id="switch-port" type="number" min="1" max="65535" value="443"></label>
@@ -54,7 +55,7 @@
               <details data-section="roles">
                 <summary>Aruba Roles</summary>
                 <div class="card-body">
-                  <p class="help">AOS-CX faceplate only. The role name must match the role the switch applies. The EX faceplate uses the Juniper/Mist Roles and Port profiles sections. Legend order 0 hides a role. Empty color means no light. A link with no authenticated client stays dark, even when the Port up role has a color. Choose one Port up, one Port down, and one Multiple roles role.</p>
+                  <p class="help">AOS-CX faceplate only. The name is the role on the switch. The jack uses this color only when that name matches the role the switch applied. The port popup shows the switch role, including a role that is not in this list, and that port stays grey. The label is the legend text. The EX faceplate uses the Juniper/Mist Roles and Port profiles sections. Legend order 0 hides a role. Empty color means no light. A link with no authenticated client stays dark, even when the Port up role has a color. Choose one Port up, one Port down, and one Multiple roles role.</p>
                   <div id="roles"></div>
                   <button type="button" class="secondary" id="add-role">Add role</button>
                 </div>
@@ -223,7 +224,8 @@
       <form method="dialog"><button class="secondary" value="close">Close</button></form>
     </div>
     <div class="faq-body">
-      <p>AOS-CX has a port-access role. The jack color on that faceplate is the role the switch applied. That faceplate still reads the switch directly.</p>
+      <p>AOS-CX has a port-access role. The jack color on that faceplate is the role the switch applied. The port popup shows that role. Admin matches it by name. The label is only the legend. A role that is not in Admin stays grey. That faceplate still reads the switch directly.</p>
+      <p>The AOS-CX faceplate follows the switch. Supported models are the 6200F 12-port and the 6300F 24-port (JL666A). Any other Aruba model stays blank.</p>
       <p>Junos has no role object. Mist does. Mist pushes an ethernet-switching firewall filter with the role's name only after that role is applied to a Switch Policy. In Mist, that firewall filter is the Switch Policy. A role that is not on a Switch Policy is never pushed, so the filter and the role never appear on the Junos device. When the policy is applied, the switch has a filter of that name:</p>
       <pre><code>firewall {
     family ethernet-switching {

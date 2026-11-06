@@ -10,23 +10,23 @@ EX4000. This shot is the Mist source: the pinned jack shows the port profile and
 
 ![EX4000 faceplate with port mge-0/0/0 pinned](docs/ex-faceplate.png)
 
-AOS-CX 6200F, read from the switch. ClearPass adds the device detail on this faceplate when it is configured.
+AOS-CX, read from the switch. The faceplate follows the chassis part number: 6200F 12-port or 6300F 24-port (JL666A). ClearPass adds the device detail on this faceplate when it is configured.
 
 ![AOS-CX 6200F faceplate with port 4 pinned](docs/aos-cx-faceplate.png)
 
 ## What's supported today
 
-Two specific 12-port faceplates. A different 12-port model does not match the photo or the jack map.
+The EX4000 faceplate, plus two Aruba faceplates chosen from the switch. A different chassis does not match the photo or the jack map, and its stage stays blank.
 
-**Aruba 6200F, 12 access ports.** The app reads the switch REST API directly. Ports `1/1/1` through `1/1/12` are the jacks on the left of the photo (odd on top, even on the bottom). The 1G, SFP, and management ports on the right stay dark. The color is the role the switch applied. ClearPass is optional: when it is configured it adds device name, type, and address to the Aruba popover. The demo runs, and the jacks still color, with ClearPass left blank. This faceplate does not call Mist.
+**Aruba 6200F 12-port and 6300F 24-port (JL666A).** The app reads the switch REST API directly and uses the chassis part number. There is no model picker. Ports are odd on top and even on the bottom. That layout is noted because some Juniper switches start at port 0 on top. The 6200F lights `1/1/1` through `1/1/12`; the 1G, SFP+, and management ports on the right stay dark. The 6300F (JL666A, and the TAA twin S0G96A) lights `1/1/1` through `1/1/24`; the SFP56, console, and management ports on the right stay dark. Both photos keep their own shape inside the same column, so a longer chassis does not skew or widen the page. The color is the role the switch applied. The popup shows that role. A name in Admin that matches it supplies the color, and a role that is not listed stays grey. The legend uses the label. ClearPass is optional: when it is configured it adds device name, type, and address to the Aruba popover. The demo runs, and the jacks still color, with ClearPass left blank. This faceplate does not call Mist. Other Aruba models, including a 6200F 24-port, stay blank.
 
-**Juniper EX4000, 12 copper ports.** Ports `0`–`11` (`ge-0/0/0`–`ge-0/0/11`, or `mge-0/0/0`–`mge-0/0/11`) are the copper jacks. On an EX4000-12MP the first four are usually `mge` and the rest `ge`. SFP ports (`xe-0/1/*`), management, and console stay dark. ClearPass is not queried. A link with no client or session stays dark.
+**Juniper EX4000, 12 copper ports.** Ports `0`–`11` (`ge-0/0/0`–`ge-0/0/11`, or `mge-0/0/0`–`mge-0/0/11`) are the copper jacks, and port 0 is on top. On an EX4000-12MP the first four are usually `mge` and the rest `ge`. SFP ports (`xe-0/1/*`), management, and console stay dark. ClearPass is not queried. A link with no client or session stays dark.
 
 One source is live. Under Juniper/Mist, EX polling chooses Mist or Junos, and Save applies that choice. The other source stays filled in and idle. Junos reads the switch REST API. The switch must already have `system services rest https` (port 3443 by default). Mist uses a radius-group role when Mist applied one, and the port profile otherwise. There is no port profile on the Junos path.
 
 Junos has no role object. Mist still calls it a Role. Mist pushes an ethernet-switching firewall filter of the same name only after that role is applied to a Switch Policy. In Mist, that firewall filter is the Switch Policy. A role that is not on a Switch Policy is never pushed, so the filter and the role never appear on the switch. The faceplate says Role for Mist and Firewall filter for Junos. The FAQ next to Admin spells this out.
 
-Not covered: other Aruba or Juniper chassis (including other 12-port models), and Aruba Central as a data source.
+Not covered: other Aruba or Juniper chassis, and Aruba Central as a data source.
 
 `SUPPORT.md` is the field-by-field description of what each faceplate reads.
 

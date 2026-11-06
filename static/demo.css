@@ -58,6 +58,7 @@
   width: min(var(--column), calc(100% - 40px));
   margin: 8px auto 0;
   padding: 0;
+  aspect-ratio: 1254 / 216;
 }
 
 .faceplate {

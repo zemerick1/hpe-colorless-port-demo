@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from app.aoscx import ACCESS_PORT_COUNT, RawClient, RawPort, empty_ports
+from app.aoscx import MODELS_BY_ID, SUPPORTED_MODELS, RawClient, RawPort, empty_ports
 
 MAC_METHODS = {"mac-auth", "port-security"}
 
@@ -13,71 +13,29 @@ def _norm(value: str) -> str:
     return re.sub(r"[ -]+", "_", value).casefold()
 
 
-_COMPACT = {
-    "accesspoint": "ap",
-    "accesspt": "ap",
-    "wirelessap": "ap",
-    "securitycamera": "camera",
-    "securitycam": "camera",
-    "ipcamera": "camera",
-    "ipphone": "phone",
-    "voipphone": "phone",
-}
-
-
-def _compact(value: str) -> str:
-    text = re.sub(r"[^a-z0-9]", "", value.casefold())
-    if text.startswith("aruba"):
-        text = text[5:]
-    return _COMPACT.get(text, text)
-
-
 def match_role(raw: str, roles: list[dict]) -> dict | None:
+    """Match an AOS-CX applied role to the admin role name.
+
+    The name is the role on the switch. The label is not a match key, and
+    neither are spacing, aliases, or prefixes. A downloadable user role
+    arrives as *Name or *Name-<digits>; those decorations still match Name.
+    """
     name = (raw or "").strip()
-    if name.startswith("*"):
-        name = name[1:]
-    if name.endswith("*"):
-        name = name[:-1]
     if not name:
         return None
     candidates = [name]
-    stripped = re.match(r"^(.*)-\d+$", name)
-    if stripped and stripped.group(1):
-        candidates.append(stripped.group(1))
-    prefix = name[:-3] if name.endswith("...") else ""
-
-    def consider(candidate: str) -> dict | None:
-        folded = candidate.casefold()
-        normalized = _norm(candidate)
-        for role in roles:
-            if role["name"] == candidate or role["name"].casefold() == folded:
-                return role
-        for role in roles:
-            if _norm(role["name"]) == normalized:
-                return role
-            display = role.get("display_name") or ""
-            if display and _norm(display) == normalized:
-                return role
-        return None
-
+    bare = name[1:] if name.startswith("*") else name
+    if bare.endswith("*"):
+        bare = bare[:-1]
+    if bare and bare not in candidates:
+        candidates.append(bare)
+    stripped = re.match(r"^(.*)-\d+$", bare)
+    base = stripped.group(1) if stripped else ""
+    if base and base not in candidates:
+        candidates.append(base)
     for candidate in candidates:
-        found = consider(candidate)
-        if found is not None:
-            return found
-    if prefix:
-        normalized = _norm(prefix)
         for role in roles:
-            if _norm(role["name"]).startswith(normalized):
-                return role
-    for candidate in candidates:
-        compact = _compact(candidate)
-        if len(compact) < 2:
-            continue
-        for role in roles:
-            labels = [role["name"]]
-            if role.get("display_name"):
-                labels.append(role["display_name"])
-            if any(_compact(label) == compact for label in labels):
+            if role["name"] == candidate:
                 return role
     return None
 
@@ -127,22 +85,43 @@ def build_snapshot(
 ) -> dict:
     member = int(settings.get("vsf_member") or 1)
     by_number = {port.number: port for port in raw_ports or []}
-    if platform == "ex":
+    ex = platform == "ex"
+    if ex:
         base_ports = [RawPort(number=number, name=f"ge-0/0/{number}", status="down") for number in range(12)]
+        model_id = ""
+        model_label = ""
+        model_heading = ""
+        access_count = 12
+    elif "model" in poll:
+        model_id = str(poll.get("model") or "")
+        face = MODELS_BY_ID.get(model_id)
+        if face is None:
+            base_ports = []
+            model_id = ""
+            model_label = ""
+            model_heading = ""
+            access_count = 0
+        else:
+            base_ports = empty_ports(member, face.access_ports)
+            model_label = face.label
+            model_heading = face.heading
+            access_count = face.access_ports
     else:
-        base_ports = empty_ports(member)
+        face = MODELS_BY_ID["cx6200f-12"]
+        base_ports = empty_ports(member, face.access_ports)
+        model_id = face.id
+        model_label = face.label
+        model_heading = face.heading
+        access_count = face.access_ports
     ports_in = []
     for blank in base_ports:
         ports_in.append(by_number.get(blank.number, blank))
 
     by_id = {role["id"]: role for role in roles}
-    up = by_id.get(settings.get("port_up_role_id"))
     down = by_id.get(settings.get("port_down_role_id"))
     multi = by_id.get(settings.get("multiple_roles_role_id"))
-    up_color = (up or {}).get("port_color") or ""
     multi_color = (multi or {}).get("port_color") or "#E702F7"
     show_device = bool(settings.get("show_device_name_on_mac", True))
-    ex = platform == "ex"
     profile_list = profiles or []
     mist_role_list = mist_roles or []
 
@@ -152,7 +131,7 @@ def build_snapshot(
             visible = _visible_profiles(port.clients, profile_list, mist_role_list)
             color, port_role, no_popover = _port_color(port, visible, None, None, "")
         else:
-            visible = _visible_clients(port.clients, roles, down, show_device, up_color)
+            visible = _visible_clients(port.clients, roles, down, show_device)
             color, port_role, no_popover = _port_color(
                 port, visible, down, multi, multi_color
             )
@@ -209,7 +188,12 @@ def build_snapshot(
         "poll": poll,
         "legend": legend,
         "ports": painted,
-        "access_port_count": ACCESS_PORT_COUNT,
+        "access_port_count": access_count,
+        "model": model_id,
+        "model_label": model_label,
+        "model_heading": model_heading,
+        "detected_part": "" if ex else str(poll.get("detected_part") or ""),
+        "supported_models": list(SUPPORTED_MODELS),
     }
 
 
@@ -218,7 +202,6 @@ def _visible_clients(
     roles: list[dict],
     down: dict | None,
     show_device: bool,
-    up_color: str,
 ) -> list[dict]:
     visible = []
     for client in clients:
@@ -228,16 +211,19 @@ def _visible_clients(
         # color is only the fill for a link with no clients.
         if role is not None and down is not None and role["id"] == down["id"]:
             continue
+        switch_role = (client.role or "").strip()
         if role is None:
-            label = client.role.lstrip("*") or "Unknown"
+            # The switch role is what the popup shows. Grey means Admin has
+            # no role with that name. The legend label is not involved.
+            label = switch_role or "Unknown"
             description = "This role is not on the admin role list yet."
-            color = up_color or "#888888"
+            color = "#888888"
             no_popover = False
-            role_name = client.role
+            role_name = switch_role or "Unknown"
         else:
-            label = _role_label(role)
+            label = switch_role or role["name"]
             description = role.get("description") or ""
-            color = role.get("port_color") or up_color or "#888888"
+            color = role.get("port_color") or ""
             no_popover = bool(role.get("no_popover"))
             role_name = role["name"]
         method = auth_label(client.auth_method)

@@ -72,6 +72,26 @@ SETTINGS = {
 }
 
 
+def test_snapshot_follows_the_detected_chassis():
+    blank = build_snapshot([], SETTINGS, ROLES, {"configured": True, "model": ""})
+    assert blank["ports"] == []
+    assert blank["access_port_count"] == 0
+    assert blank["model"] == ""
+    wide = build_snapshot(
+        [RawPort(24, "1/1/24", "up")],
+        SETTINGS,
+        ROLES,
+        {"configured": True, "model": "cx6300f-24", "detected_part": "JL666A"},
+    )
+    assert wide["access_port_count"] == 24
+    assert len(wide["ports"]) == 24
+    assert wide["model_heading"] == "AOS-CX 6300F"
+    assert wide["detected_part"] == "JL666A"
+    assert wide["ports"][23]["name"] == "1/1/24"
+    assert wide["ports"][23]["status"] == "up"
+    assert wide["supported_models"] == ["6200F 12-port", "6300F 24-port (JL666A)"]
+
+
 def paint(ports, **overrides):
     settings = dict(SETTINGS)
     settings.update(overrides)
@@ -87,10 +107,20 @@ def port(number, status="up", clients=None, lldp=""):
     return RawPort(number, f"1/1/{number}", status, lldp, list(clients or []))
 
 
-def test_role_match_strips_downloadable_prefix_and_suffix():
+def test_role_match_uses_the_switch_name_only():
     assert match_role("*Employee-12", ROLES)["name"] == "Employee"
     assert match_role("*Employee-4821", ROLES)["name"] == "Employee"
     assert match_role("Employee*", ROLES)["name"] == "Employee"
+    exact = ROLES + [{
+        "id": 9,
+        "name": "*Employee-12",
+        "display_name": "Session",
+        "description": "The applied string itself.",
+        "port_color": "#112233",
+        "legend_order": 2,
+        "no_popover": False,
+    }]
+    assert match_role("*Employee-12", exact)["name"] == "*Employee-12"
     roles = ROLES + [{
         "id": 3,
         "name": "AccessPoint",
@@ -100,20 +130,55 @@ def test_role_match_strips_downloadable_prefix_and_suffix():
         "legend_order": 2,
         "no_popover": False,
     }]
-    assert match_role("ARUBA-AP", roles)["name"] == "AccessPoint"
+    assert match_role("ARUBA-AP", roles) is None
     assert match_role("ARUBA-AP", roles + [{
         "id": 9,
         "name": "ARUBA-AP",
-        "display_name": "ARUBA-AP",
+        "display_name": "Lobby AP",
         "description": "Exact switch role.",
         "port_color": "#112233",
         "legend_order": 2,
         "no_popover": False,
     }])["name"] == "ARUBA-AP"
-    roles = [{**ROLES[3], "name": "Security_Camera", "display_name": "Security Camera"}]
-    assert match_role("Security Camera", roles)["name"] == "Security_Camera"
-    assert match_role("Security-Camera", roles)["name"] == "Security_Camera"
+    labeled = [{**ROLES[2], "display_name": "Staff"}]
+    assert match_role("Staff", labeled) is None
+    assert match_role("employee", labeled) is None
+    spaced = [{**ROLES[3], "name": "Security_Camera", "display_name": "Security Camera"}]
+    assert match_role("Security Camera", spaced) is None
+    assert match_role("Security-Camera", spaced) is None
+    assert match_role("Security_Camera", spaced)["name"] == "Security_Camera"
     assert match_role("", ROLES) is None
+
+
+def test_popup_role_is_the_switch_role_and_the_label_is_legend_only():
+    roles = [{**role} for role in ROLES]
+    roles[2] = {**roles[2], "display_name": "Staff"}
+    settings = dict(SETTINGS)
+    settings["port_up_role_id"] = 5
+    snap = build_snapshot(
+        [
+            port(1, clients=[client("aa:bb:cc:dd:ee:01", "*Employee-12", username="ada")]),
+            port(2, clients=[client("aa:bb:cc:dd:ee:02", "Contractor", username="sam")]),
+            port(3, clients=[client("aa:bb:cc:dd:ee:03", "Staff", username="pat")]),
+        ],
+        settings,
+        roles,
+        {"configured": True},
+    )
+    employee = snap["ports"][0]
+    assert employee["color"] == "#FF8300"
+    assert employee["clients"][0]["role_label"] == "*Employee-12"
+    assert employee["clients"][0]["role_name"] == "Employee"
+    unknown = snap["ports"][1]
+    assert unknown["color"] == "#888888"
+    assert unknown["clients"][0]["role_label"] == "Contractor"
+    assert unknown["clients"][0]["color"] == "#888888"
+    label_only = snap["ports"][2]
+    assert label_only["color"] == "#888888"
+    assert label_only["clients"][0]["role_label"] == "Staff"
+    labels = [item["label"] for item in snap["legend"]]
+    assert "Staff" in labels
+    assert "Employee" not in labels
 
 
 def test_one_client_uses_that_role_color():
