@@ -5,7 +5,7 @@ The demo has two faceplates. A toggle on the demo page picks which chassis is dr
 ## AOS-CX
 
 - The app logs into the switch REST API with the username and password from Admin. Later reads send the session token.
-- The faceplate follows the chassis part number from `/system/subsystems`. Supported models are the 6200F 12-port (`R8Q72A`, `R8V13A`) and the 6300F 24-port (`JL666A`, `S0G96A`). A locale suffix such as `#ACC` is ignored. `platform_name` alone is not enough, so a 6200F 24-port or a 6300F 48-port stays blank.
+- The faceplate follows the chassis part number from `/system/subsystems`. Supported models are the 6200F 12-port (`R8Q72A`, `R8V13A`) and the 6300F 24-port (`JL666A`, `S0G96A`). `platform_name` alone is not enough, so a 6200F 24-port or a 6300F 48-port stays blank.
 - The 6200F lights `1/1/1` through `1/1/12`. The 6300F lights `1/1/1` through `1/1/24`. SFP, console, and management ports stay dark. If the part number is known but the interface list has a port that chassis does not have, the stage stays blank.
 - The admin role name is the role on the switch. The jack uses that color when the name matches. The port popup shows the role the switch applied, including a role that is not in Admin. An unmatched role lights grey. The label is the legend text only.
 - ClearPass is optional. It fills device name, device type, category, OS family, and IP on that faceplate only.
