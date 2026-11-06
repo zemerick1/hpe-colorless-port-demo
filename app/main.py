@@ -245,28 +245,35 @@ def create_app(db_path=None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         session = AoscxSession(target)
         try:
-            hostname, version, ports = await session.poll_access_ports()
+            read = await session.poll_access_ports()
         except AoscxError as exc:
             return {"ok": False, "error": str(exc)}
         finally:
             await session.close()
         status: PollStatus = app.state.poll
-        status.raw_ports = ports
+        status.raw_ports = read.ports
         status.switch_ok = True
         status.switch_error = ""
-        status.hostname = hostname
-        status.software_version = version
+        status.hostname = read.hostname
+        status.software_version = read.software_version
+        status.model = read.model_id
+        status.model_label = read.model_label
+        status.model_heading = read.model_heading
+        status.detected_part = read.detected_part
+        status.model_note = read.model_note
         from datetime import datetime, timezone
 
         status.polled_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        clients = sum(len(port.clients) for port in ports)
-        up = sum(1 for port in ports if port.status == "up")
+        clients = sum(len(port.clients) for port in read.ports)
+        up = sum(1 for port in read.ports if port.status == "up")
         return {
             "ok": True,
-            "hostname": hostname,
-            "software_version": version,
+            "hostname": read.hostname,
+            "software_version": read.software_version,
             "ports_up": up,
             "clients": clients,
+            "model": read.model_id,
+            "detected_part": read.detected_part,
         }
 
     @app.post("/api/admin/test/clearpass")
@@ -445,6 +452,11 @@ def _cx_poll_view(app: FastAPI, settings: dict) -> dict:
         "polled_at": poll.polled_at,
         "hostname": poll.hostname,
         "software_version": poll.software_version,
+        "model": poll.model,
+        "model_label": poll.model_label,
+        "model_heading": poll.model_heading,
+        "detected_part": poll.detected_part,
+        "model_note": poll.model_note if poll.polled_at and not poll.model else "",
         "watching": _watching(app, settings),
         "clearpass_configured": bool(settings.get("clearpass_host")),
         "clearpass_ok": poll.clearpass_ok,

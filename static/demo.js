@@ -1,12 +1,29 @@
 const HINTS = {
-  cx: "Ports 1–12 light from the access role. Click a lit port to pin its details. The 1G, SFP, and management ports on the right stay dark.",
   ex: "Ports ge-0/0/0–11 light from the live source. Mist calls that name a Role. Direct Junos shows it as a firewall filter. Click a lit port to pin its details. SFP, management, and console stay dark.",
 };
+
+function cxHeading(model, heading) {
+  if (heading) return heading;
+  if (model === "cx6200f-12") return "AOS-CX 6200F";
+  if (model === "cx6300f-24") return "AOS-CX 6300F";
+  return "AOS-CX";
+}
+
+function cxHint(model) {
+  if (model === "cx6200f-12") {
+    return "Ports 1–12 light from the access role. Click a lit port to pin its details. The 1G, SFP, and management ports on the right stay dark.";
+  }
+  if (model === "cx6300f-24") {
+    return "Ports 1–24 light from the access role. Click a lit port to pin its details. The SFP56, console, and management ports on the right stay dark.";
+  }
+  return "The faceplate appears after the switch reports a supported model.";
+}
 
 const state = {
   snap: null,
   first: true,
   platform: "cx",
+  cxModel: "",
   ticket: 0,
   signatures: new Map(),
   pinned: new Set(),
@@ -23,7 +40,7 @@ document.querySelectorAll(".faceplate").forEach((plate) => {
 });
 
 function activePlate() {
-  return document.querySelector('.faceplate[data-platform="' + state.platform + '"]');
+  return document.querySelector(".faceplate.is-active");
 }
 
 function portButton(number) {
@@ -41,7 +58,16 @@ function signature(port) {
 }
 
 function apply(snap) {
+  if ((snap.platform || state.platform) === "cx" && (snap.model || "") !== state.cxModel) {
+    for (const number of [...state.open]) closePopover(number);
+    state.pinned.clear();
+    state.open.clear();
+    state.signatures.clear();
+    state.cxModel = snap.model || "";
+    state.first = true;
+  }
   state.snap = snap;
+  revealCx(snap);
   const first = state.first;
   state.first = false;
   const changed = [];
@@ -315,6 +341,10 @@ function renderStatus(snap) {
   }
   if ((snap.platform || state.platform) === "ex") {
     document.getElementById("platform-label").textContent = exHeading(poll.source);
+  } else {
+    document.getElementById("platform-label").textContent = cxHeading(snap.model, snap.model_heading);
+    document.getElementById("legend-hint").textContent = cxHint(snap.model);
+    if (poll.polled_at && !poll.error && !snap.model && poll.model_note) notes.push(poll.model_note);
   }
   if (poll.clearpass_configured && poll.clearpass_error) notes.push("ClearPass: " + poll.clearpass_error);
   banner.hidden = notes.length === 0;
@@ -357,10 +387,29 @@ function exHeading(source) {
   return "EX4000";
 }
 
+function faceIsActive(plate, platform) {
+  if (platform === "ex") return plate.dataset.platform === "ex";
+  return plate.dataset.model === state.cxModel && state.cxModel !== "";
+}
+
+function revealCx(snap) {
+  if ((snap.platform || state.platform) !== "cx") return;
+  document.querySelectorAll('.faceplate[data-platform="cx"]').forEach((plate) => {
+    const active = plate.dataset.model === (snap.model || "");
+    plate.classList.toggle("is-active", active && snap.model);
+    if (!active) {
+      plate.querySelectorAll(".port").forEach((port) => {
+        port.classList.remove("is-lit", "pinned");
+        port.style.removeProperty("--lamp");
+      });
+    }
+  });
+}
+
 function showPlatform(platform) {
   state.platform = platform;
   document.querySelectorAll(".faceplate").forEach((plate) => {
-    const active = plate.dataset.platform === platform;
+    const active = faceIsActive(plate, platform);
     plate.classList.toggle("is-active", active);
     if (!active) {
       plate.querySelectorAll(".port").forEach((port) => {
@@ -374,9 +423,10 @@ function showPlatform(platform) {
   cx.setAttribute("aria-pressed", platform === "cx" ? "true" : "false");
   ex.setAttribute("aria-pressed", platform === "ex" ? "true" : "false");
   const source = state.snap && state.snap.poll ? state.snap.poll.source : "";
-  document.getElementById("platform-label").textContent = platform === "ex" ? exHeading(source) : "AOS-CX 6200F";
+  const heading = state.snap && state.snap.model_heading;
+  document.getElementById("platform-label").textContent = platform === "ex" ? exHeading(source) : cxHeading(state.cxModel, heading);
   document.getElementById("legend-title").textContent = platform === "ex" ? "EX colors" : "Role colors";
-  document.getElementById("legend-hint").textContent = HINTS[platform];
+  document.getElementById("legend-hint").textContent = platform === "ex" ? HINTS.ex : cxHint(state.cxModel);
   try {
     localStorage.setItem("colorless-platform", platform);
   } catch (err) {

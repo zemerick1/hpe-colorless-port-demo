@@ -9,11 +9,16 @@ from app.aoscx import (
     AoscxError,
     AoscxSession,
     SwitchTarget,
+    identify_chassis,
     parse_clients,
     parse_lldp_name,
     ports_from_interfaces,
     resolved_role_name,
 )
+
+
+def chassis_body(part: str, kind: str = "chassis") -> dict:
+    return {"1": {"type": kind, "part_number": part, "product_name": part}}
 
 PASSWORD = "switch-session-secret"
 
@@ -176,6 +181,8 @@ def test_uri_only_interface_map_reads_each_port_link_state():
         if request.url.path.endswith("/login"):
             return httpx.Response(200, headers={"X-CSRF-Token": "csrf-token"})
         path = unquote(request.url.path)
+        if path.endswith("/subsystems"):
+            return httpx.Response(200, json=chassis_body("R8Q72A"))
         if path.endswith("/system"):
             return httpx.Response(200, json={"hostname": "Office6200", "software_version": "ML.10.17"})
         if path.endswith("/interfaces"):
@@ -215,7 +222,9 @@ def test_uri_only_interface_map_reads_each_port_link_state():
         session = AoscxSession(target(), client)
         return await session.poll_access_ports()
 
-    _hostname, _version, ports = asyncio.run(run())
+    read = asyncio.run(run())
+    assert read.model_id == "cx6200f-12"
+    ports = read.ports
     assert ports[0].status == "up"
     assert ports[0].clients[0].role == "ARUBA-AP"
     assert ports[0].clients[0].auth_method == "device-profile"
@@ -231,6 +240,8 @@ def test_poll_rewrites_a_generated_radius_role_from_its_base_name():
         if request.url.path.endswith("/login"):
             return httpx.Response(200, headers={"X-CSRF-Token": "csrf-token"})
         path = unquote(request.url.path)
+        if path.endswith("/subsystems"):
+            return httpx.Response(200, json=chassis_body("R8V13A"))
         if path.endswith("/system"):
             return httpx.Response(200, json={"hostname": "Office6200", "software_version": "ML.10.17"})
         if path.endswith("/interfaces"):
@@ -262,7 +273,9 @@ def test_poll_rewrites_a_generated_radius_role_from_its_base_name():
         session = AoscxSession(target(), client)
         return await session.poll_access_ports()
 
-    _hostname, _version, ports = asyncio.run(run())
+    read = asyncio.run(run())
+    assert read.model_id == "cx6200f-12"
+    ports = read.ports
     assert ports[1].clients[0].role == "allow-any-anyv4"
     assert ports[1].clients[0].vlan == "200"
 
@@ -277,8 +290,10 @@ def test_poll_uses_csrf_token_and_falls_back_from_depth_2():
             return httpx.Response(200, headers={"X-CSRF-Token": "csrf-token"})
         assert request.headers["x-csrf-token"] == "csrf-token"
         path = request.url.path
+        if path.endswith("/subsystems"):
+            return httpx.Response(200, json=chassis_body("R8Q72A"))
         if path.endswith("/system"):
-            return httpx.Response(200, json={"hostname": "lab-6200", "software_version": "ML.10.17"})
+            return httpx.Response(200, json={"hostname": "lab-6200", "software_version": "ML.10.17", "platform_name": "6200"})
         if path.endswith("/interfaces"):
             return httpx.Response(
                 200,
@@ -313,7 +328,9 @@ def test_poll_uses_csrf_token_and_falls_back_from_depth_2():
         session = AoscxSession(target(), client)
         return await session.poll_access_ports()
 
-    hostname, version, ports = asyncio.run(run())
+    read = asyncio.run(run())
+    hostname, version, ports = read.hostname, read.software_version, read.ports
+    assert read.model_id == "cx6200f-12"
     assert hostname == "lab-6200"
     assert version == "ML.10.17"
     assert ports[0].status == "up"
@@ -324,3 +341,122 @@ def test_poll_uses_csrf_token_and_falls_back_from_depth_2():
     assert any(path.endswith("/port_access_clients") and depth == "2" for _, path, depth in calls)
     assert any(path.endswith("/port_access_clients") and depth == "1" for _, path, depth in calls)
     assert PASSWORD not in repr(calls)
+
+
+def test_product_info_holds_the_part_number():
+    model, part = identify_chassis(
+        {
+            "chassis,1": {
+                "type": "chassis",
+                "product_info": {
+                    "part_number": "R8Q72A#ACC",
+                    "product_name": "6200F 12G Class4 PoE 2G/2SFP+ 139W Switch",
+                },
+            }
+        }
+    )
+    assert model is not None and model.id == "cx6200f-12"
+    assert part == "R8Q72A"
+
+
+def test_part_number_picks_the_face_and_ignores_platform_name():
+    model, part = identify_chassis({"1": {"type": "chassis", "part_number": "JL666A#ACC"}})
+    assert model is not None and model.id == "cx6300f-24"
+    assert part == "JL666A"
+    model, part = identify_chassis(
+        {
+            "fan": {"type": "fan", "part_number": "JL666A"},
+            "1": {"type": "chassis", "part_number": "R8V13A"},
+        }
+    )
+    assert model is not None and model.id == "cx6200f-12"
+    assert part == "R8V13A"
+    model, part = identify_chassis(
+        {"1": {"type": "chassis", "part_number": "JL725A", "product_description": "not a JL666A"}}
+    )
+    assert model is None
+    assert part == "JL725A"
+    model, part = identify_chassis({"1": {"type": "chassis", "product_name": "6300"}})
+    assert model is None
+    assert part == ""
+
+
+def test_twenty_four_port_face_keeps_copper_and_drops_sfp():
+    payload = {f"1/1/{number}": {"link_state": "up"} for number in (1, 24, 25)}
+    ports = ports_from_interfaces(payload, 1, 24)
+    assert [port.number for port in ports] == list(range(1, 25))
+    assert ports[23].name == "1/1/24"
+    assert ports[23].status == "up"
+    assert all(port.number != 25 for port in ports)
+
+
+def _poll(part: str, interfaces: dict, platform_name: str = "6300", queries: list | None = None):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/login"):
+            return httpx.Response(200, headers={"X-CSRF-Token": "csrf-token"})
+        path = unquote(request.url.path)
+        if path.endswith("/subsystems"):
+            if queries is not None:
+                queries.append(dict(request.url.params))
+            return httpx.Response(
+                200,
+                json={
+                    "chassis,1": {
+                        "type": "chassis",
+                        "product_info": {"part_number": part, "product_name": part},
+                    }
+                },
+            )
+        if path.endswith("/system"):
+            return httpx.Response(
+                200,
+                json={"hostname": "core", "software_version": "LL.10.15", "platform_name": platform_name},
+            )
+        if path.endswith("/interfaces") and "/interfaces/" not in path:
+            return httpx.Response(200, json=interfaces)
+        if path.endswith("/port_access_clients"):
+            return httpx.Response(200, json={})
+        if path.endswith("/lldp_neighbors"):
+            return httpx.Response(404, json={})
+        return httpx.Response(404, json={})
+
+    async def run():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        session = AoscxSession(target(), client)
+        return await session.poll_access_ports()
+
+    return asyncio.run(run())
+
+
+def test_subsystem_read_asks_for_product_info():
+    queries: list[dict] = []
+    read = _poll("R8Q72A", {"1/1/1": {"link_state": "up"}}, queries=queries)
+    assert read.model_id == "cx6200f-12"
+    assert queries[0]["attributes"] == "type,product_info"
+    assert queries[0]["depth"] == "2"
+    assert "part_number" not in queries[0]["attributes"]
+
+
+def test_jl666a_and_taa_twin_select_the_24_port_face():
+    for part in ("JL666A", "JL666A#ACC", "S0G96A"):
+        read = _poll(part, {"1/1/1": {"link_state": "up"}, "1/1/24": {"link_state": "down"}, "1/1/25": {"link_state": "up"}})
+        assert read.model_id == "cx6300f-24"
+        assert read.model_heading == "AOS-CX 6300F"
+        assert [port.number for port in read.ports] == list(range(1, 25))
+        assert read.ports[0].status == "up"
+        assert all(port.number < 25 for port in read.ports)
+        assert read.model_note == ""
+
+
+def test_unknown_part_and_extra_interfaces_leave_the_face_blank():
+    unknown = _poll("JL725A", {"1/1/1": {"link_state": "up"}}, platform_name="6300")
+    assert unknown.model_id == ""
+    assert unknown.ports == []
+    assert unknown.detected_part == "JL725A"
+    assert "6200F 12-port" in unknown.model_note
+    assert "6300F 24-port (JL666A)" in unknown.model_note
+
+    conflict = _poll("JL666A", {"1/1/1": {"link_state": "up"}, "1/1/48": {"link_state": "up"}})
+    assert conflict.model_id == ""
+    assert conflict.ports == []
+    assert "1/1/48" in conflict.model_note

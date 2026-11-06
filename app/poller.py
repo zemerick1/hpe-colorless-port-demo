@@ -26,6 +26,11 @@ class PollStatus:
     hostname: str = ""
     software_version: str = ""
     raw_ports: list[RawPort] | None = None
+    model: str = ""
+    model_label: str = ""
+    model_heading: str = ""
+    detected_part: str = ""
+    model_note: str = ""
     clearpass_ok: bool = False
     clearpass_error: str = ""
     ex_ok: bool = False
@@ -205,6 +210,8 @@ class Poller:
             int(settings["vsf_member"]),
         )
         if self.switch is None or fingerprint != self.switch_fp:
+            if self.switch_fp is not None and fingerprint != self.switch_fp:
+                self._blank_cx_model()
             if self.switch is not None:
                 await self.switch.close()
             host, port = normalize_switch_host(settings["switch_host"], int(settings["switch_port"]))
@@ -220,14 +227,20 @@ class Poller:
                 )
             )
             self.switch_fp = fingerprint
-        hostname, version, ports = await self.switch.poll_access_ports()
+        read = await self.switch.poll_access_ports()
+        ports = read.ports
         await self._enrich(settings, ports)
         status: PollStatus = self.app.state.poll
         status.raw_ports = ports
         status.switch_ok = True
         status.switch_error = ""
-        status.hostname = hostname
-        status.software_version = version
+        status.hostname = read.hostname
+        status.software_version = read.software_version
+        status.model = read.model_id
+        status.model_label = read.model_label
+        status.model_heading = read.model_heading
+        status.detected_part = read.detected_part
+        status.model_note = read.model_note
         status.polled_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         if self._logged:
             logger.info("switch poll recovered")
@@ -313,6 +326,20 @@ class Poller:
             logger.warning("ex poll: %s", message)
             self._ex_logged = message
 
+    def _blank_cx_model(self) -> None:
+        status: PollStatus = self.app.state.poll
+        status.raw_ports = []
+        status.switch_ok = False
+        status.switch_error = ""
+        status.hostname = ""
+        status.software_version = ""
+        status.model = ""
+        status.model_label = ""
+        status.model_heading = ""
+        status.detected_part = ""
+        status.model_note = ""
+        status.polled_at = None
+
     async def _clear_cx(self) -> None:
         status: PollStatus = self.app.state.poll
         status.switch_ok = False
@@ -320,6 +347,11 @@ class Poller:
         status.raw_ports = None
         status.hostname = ""
         status.software_version = ""
+        status.model = ""
+        status.model_label = ""
+        status.model_heading = ""
+        status.detected_part = ""
+        status.model_note = ""
         status.polled_at = None
         status.clearpass_ok = False
         status.clearpass_error = ""

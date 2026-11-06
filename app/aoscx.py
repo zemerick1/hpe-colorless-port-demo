@@ -11,6 +11,47 @@ from urllib.parse import quote, unquote
 import httpx
 
 ACCESS_PORT_COUNT = 12
+SUPPORTED_MODELS = (
+    "6200F 12-port",
+    "6300F 24-port (JL666A)",
+)
+
+
+@dataclass(frozen=True)
+class FaceplateModel:
+    id: str
+    label: str
+    heading: str
+    part_numbers: frozenset[str]
+    access_ports: int
+    last_physical: int
+
+
+FACEPLATES = (
+    FaceplateModel(
+        id="cx6200f-12",
+        label="6200F 12-port",
+        heading="AOS-CX 6200F",
+        part_numbers=frozenset({"R8Q72A", "R8V13A"}),
+        access_ports=12,
+        last_physical=16,
+    ),
+    FaceplateModel(
+        id="cx6300f-24",
+        label="6300F 24-port (JL666A)",
+        heading="AOS-CX 6300F",
+        part_numbers=frozenset({"JL666A", "S0G96A"}),
+        access_ports=24,
+        last_physical=28,
+    ),
+)
+MODELS_BY_ID = {model.id: model for model in FACEPLATES}
+MODELS_BY_PART = {
+    part: model
+    for model in FACEPLATES
+    for part in model.part_numbers
+}
+
 CLIENT_ATTRIBUTES = (
     "mac,applied_role,onboarded_method,client_state,access_vlan,device_profile,"
     "ubt_client_state,ubt_tunnel_hw_programmed,ubt_uac_tunnel,auth_attributes"
@@ -63,6 +104,22 @@ class RawPort:
     status: str
     lldp_neighbor: str = ""
     clients: list[RawClient] = field(default_factory=list)
+
+
+@dataclass
+class ChassisPoll:
+    hostname: str
+    software_version: str
+    ports: list[RawPort]
+    model_id: str = ""
+    model_label: str = ""
+    model_heading: str = ""
+    detected_part: str = ""
+    conflict_port: int = 0
+
+    @property
+    def model_note(self) -> str:
+        return unsupported_note(self.model_id, self.detected_part, self.conflict_port)
 
 
 def normalize_switch_host(host: str, port: int) -> tuple[str, int]:
@@ -119,10 +176,97 @@ def iter_resources(payload: object) -> list[dict]:
     return items
 
 
-def empty_ports(member: int) -> list[RawPort]:
+def _normalize_part(value: object) -> str:
+    text = str(value or "").strip().upper()
+    if not text:
+        return ""
+    return text.split("#", 1)[0].strip()
+
+
+def _part_token(value: object) -> str:
+    match = re.search(r"[A-Z0-9]+", _normalize_part(value))
+    return match.group(0) if match else ""
+
+
+def _model_in_value(value: object) -> tuple[FaceplateModel | None, str]:
+    direct = _normalize_part(value)
+    if direct in MODELS_BY_PART:
+        return MODELS_BY_PART[direct], direct
+    for token in re.findall(r"[A-Za-z0-9]+", str(value or "")):
+        key = token.upper()
+        if key in MODELS_BY_PART:
+            return MODELS_BY_PART[key], key
+    return None, ""
+
+
+def _is_fru(kind: str) -> bool:
+    folded = kind.casefold().replace("_", " ").replace("-", " ")
+    return any(word in folded for word in ("fan", "psu", "power"))
+
+
+def identify_chassis(payload: object) -> tuple[FaceplateModel | None, str]:
+    """Match a supported face from chassis part fields. Fans and supplies do not count."""
+    best: FaceplateModel | None = None
+    best_rank = 2
+    detected = ""
+    for row in iter_resources(payload):
+        kind = str(row.get("type") or "")
+        if _is_fru(kind):
+            continue
+        info = row.get("product_info") if isinstance(row.get("product_info"), dict) else {}
+        part = _part_token(info.get("part_number") or row.get("part_number"))
+        if part and not detected:
+            detected = part
+        found: FaceplateModel | None = None
+        token = ""
+        if part:
+            found = MODELS_BY_PART.get(part)
+            token = part if found is not None else ""
+        else:
+            for field_name in ("product_name", "product_description"):
+                found, token = _model_in_value(info.get(field_name) or row.get(field_name))
+                if found is not None:
+                    break
+        rank = 0 if not kind or "chassis" in kind.casefold() else 1
+        if found is not None and rank < best_rank:
+            best = found
+            best_rank = rank
+            detected = part or token
+    return best, detected
+
+
+def conflicting_port(payload: object, member: int, last_physical: int) -> int:
+    """Highest interface number this chassis cannot have. Zero means the part still fits."""
+    pattern = re.compile(rf"^{member}/1/(\d+)$")
+    over = 0
+    for row in iter_resources(payload):
+        match = pattern.match(str(row.get("name") or ""))
+        if match is None:
+            continue
+        number = int(match.group(1))
+        if number > last_physical:
+            over = max(over, number)
+    return over
+
+
+def unsupported_note(model_id: str, detected_part: str, conflict_port: int = 0) -> str:
+    if model_id:
+        return ""
+    supported = (
+        "Supported models are the 6200F 12-port and the 6300F 24-port (JL666A)."
+    )
+    if conflict_port:
+        name = detected_part or "the switch"
+        return f"This switch reported {name} but has port 1/1/{conflict_port}. {supported}"
+    if detected_part:
+        return f"This switch is {detected_part}. {supported}"
+    return f"This switch did not report a part number. {supported}"
+
+
+def empty_ports(member: int, access_count: int = ACCESS_PORT_COUNT) -> list[RawPort]:
     return [
         RawPort(number=number, name=f"{member}/1/{number}", status="down")
-        for number in range(1, ACCESS_PORT_COUNT + 1)
+        for number in range(1, access_count + 1)
     ]
 
 
@@ -135,7 +279,11 @@ def link_state_of(value: object) -> str:
     return ""
 
 
-def ports_from_interfaces(payload: object, member: int) -> list[RawPort]:
+def ports_from_interfaces(
+    payload: object,
+    member: int,
+    access_count: int = ACCESS_PORT_COUNT,
+) -> list[RawPort]:
     pattern = re.compile(rf"^{member}/1/(\d+)$")
     found: dict[int, RawPort] = {}
     for row in iter_resources(payload):
@@ -144,14 +292,14 @@ def ports_from_interfaces(payload: object, member: int) -> list[RawPort]:
         if match is None:
             continue
         number = int(match.group(1))
-        if number < 1 or number > ACCESS_PORT_COUNT:
+        if number < 1 or number > access_count:
             continue
         found[number] = RawPort(
             number=number,
             name=name,
             status=link_state_of(row.get("link_state")) or "down",
         )
-    ports = empty_ports(member)
+    ports = empty_ports(member, access_count)
     for port in ports:
         if port.number in found:
             found[port.number].lldp_neighbor = port.lldp_neighbor
@@ -362,18 +510,39 @@ class AoscxSession:
         except httpx.RequestError as exc:
             raise AoscxError(f"Cannot reach switch {self.target.host}") from exc
 
-    async def poll_access_ports(self) -> tuple[str, str, list[RawPort]]:
+    async def poll_access_ports(self) -> ChassisPoll:
         system = await self.get_json(
             "/system",
             {"attributes": "hostname,software_version"},
         )
         hostname = str(system.get("hostname") or "")
         version = str(system.get("software_version") or "")
+        subsystems = await self.get_json(
+            "/system/subsystems",
+            {"depth": 2, "attributes": "type,product_info"},
+        )
+        model, detected = identify_chassis(subsystems)
+        if model is None:
+            return ChassisPoll(
+                hostname=hostname,
+                software_version=version,
+                ports=[],
+                detected_part=detected,
+            )
         interfaces = await self.get_json(
             "/system/interfaces",
             {"depth": 1, "attributes": "name,link_state", "selector": "status"},
         )
-        ports = ports_from_interfaces(interfaces, self.target.vsf_member)
+        conflict = conflicting_port(interfaces, self.target.vsf_member, model.last_physical)
+        if conflict:
+            return ChassisPoll(
+                hostname=hostname,
+                software_version=version,
+                ports=[],
+                detected_part=detected,
+                conflict_port=conflict,
+            )
+        ports = ports_from_interfaces(interfaces, self.target.vsf_member, model.access_ports)
         # A collection of URIs has no link_state, so every port looks down and
         # the client read never runs. Ask each access port directly.
         if not any(port.status == "up" for port in ports):
@@ -420,7 +589,15 @@ class AoscxSession:
                 raise AoscxError("Failed to read port access clients") from result
         await self._resolve_generated_roles(ports)
         await self._fill_missing_vlans(ports)
-        return hostname, version, ports
+        return ChassisPoll(
+            hostname=hostname,
+            software_version=version,
+            ports=ports,
+            model_id=model.id,
+            model_label=model.label,
+            model_heading=model.heading,
+            detected_part=detected,
+        )
 
     async def _refresh_link_states(self, ports: list[RawPort]) -> None:
         async def one(port: RawPort) -> None:

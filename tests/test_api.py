@@ -4,7 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from app.aoscx import AoscxError, RawClient, RawPort
+from app.aoscx import AoscxError, ChassisPoll, RawClient, RawPort
 from app.clearpass import ClearPassError, EndpointInfo
 from app.db import get_settings
 from app.mist import MistError
@@ -25,11 +25,22 @@ def test_seed_and_pages(client):
     assert "no-store" in health.headers["cache-control"]
     page = client.get("/").text
     assert 'id="faceplate"' in page
+    assert 'id="faceplate-6300"' in page
+    assert "/static/cx6300f-24.png" in page
+    assert page.count('id="port-1"') == 1
+    assert page.count('data-port="24"') == 1
+    assert "6300F 24-port (JL666A)" in page
     assert 'id="open-faq"' in page
+    css = client.get("/static/demo.css").text
+    assert "aspect-ratio: 1254 / 216" in css
+    assert "object-fit" not in css
+    assert "height: auto" in css
     admin = client.get("/admin")
     assert 'id="config-form"' in admin.text
     assert 'id="open-faq"' in admin.text
     assert "Single demo" in admin.text
+    assert 'id="supported-models"' in admin.text
+    assert "6300F 24-port (JL666A)" in admin.text
 
     config = client.get("/api/admin/config").json()
     blob = json.dumps(config)
@@ -43,8 +54,10 @@ def test_seed_and_pages(client):
     assert PASSWORD not in blob
 
     snap = client.get("/api/snapshot").json()
-    assert len(snap["ports"]) == 12
-    assert all(port["color"] == "" for port in snap["ports"])
+    assert snap["ports"] == []
+    assert snap["access_port_count"] == 0
+    assert snap["model"] == ""
+    assert snap["supported_models"] == ["6200F 12-port", "6300F 24-port (JL666A)"]
     assert all(item["label"] != "Nothing Connected" for item in snap["legend"])
 
 
@@ -167,10 +180,14 @@ def test_connection_checks_do_not_echo_secrets(client, monkeypatch):
             assert target.password == PASSWORD
 
         async def poll_access_ports(self):
-            return (
+            return ChassisPoll(
                 "lab-6200",
                 "ML.10.17",
                 [RawPort(1, "1/1/1", "up", "", [RawClient("aa", "", "mac-auth", "Employee", "", "", "1", "Bridged", "")])],
+                model_id="cx6200f-12",
+                model_label="6200F 12-port",
+                model_heading="AOS-CX 6200F",
+                detected_part="R8Q72A",
             )
 
         async def close(self):
@@ -217,12 +234,14 @@ def test_clearpass_lookup_failure_keeps_the_switch_snapshot(db_path, monkeypatch
             return None
 
         async def poll_access_ports(self):
-            return (
+            return ChassisPoll(
                 "lab-6200",
                 "ML.10.17",
                 [RawPort(1, "1/1/1", "up", "ap", [RawClient(
                     "aa:bb:cc:dd:ee:01", "", "mac-auth", "Employee", "", "", "20", "Bridged", ""
                 )])],
+                model_id="cx6200f-12",
+                detected_part="R8Q72A",
             )
 
     class ClearPassFake:
@@ -342,7 +361,8 @@ def test_ex_faceplate_is_separate_and_settings_round_trip(client, db_path):
 
     cx = client.get("/api/snapshot").json()
     assert cx["platform"] == "cx"
-    assert [port["number"] for port in cx["ports"]] == list(range(1, 13))
+    assert cx["ports"] == []
+    assert cx["model"] == ""
     ex = client.get("/api/snapshot?platform=ex").json()
     assert ex["platform"] == "ex"
     assert [port["number"] for port in ex["ports"]] == list(range(12))
