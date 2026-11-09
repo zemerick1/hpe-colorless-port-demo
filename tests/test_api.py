@@ -26,10 +26,18 @@ def test_seed_and_pages(client):
     page = client.get("/").text
     assert 'id="faceplate"' in page
     assert 'id="faceplate-6300"' in page
+    assert 'id="faceplate-6300m"' in page
     assert "/static/cx6300f-24.png" in page
+    assert "/static/cx6300m-24.png" in page
+    assert 'width="1456" height="144"' in page
+    assert page.count('width="1456" height="144"') == 2
     assert page.count('id="port-1"') == 1
-    assert page.count('data-port="24"') == 1
+    assert page.count('data-port="24"') == 2
+    assert page.count('data-port="1" data-row="top" aria-label="Port 1" style="left:43.96%') == 2
+    assert page.count('data-port="9" data-row="top" aria-label="Port 9" style="left:56.52%') == 1
+    assert page.count('data-port="9" data-row="top" aria-label="Port 9" style="left:58.31%') == 1
     assert "6300F 24-port (JL666A)" in page
+    assert "6300M 24-port (JL660A)" in page
     assert 'id="open-faq"' in page
     css = client.get("/static/demo.css").text
     assert "aspect-ratio: 1254 / 216" in css
@@ -41,6 +49,7 @@ def test_seed_and_pages(client):
     assert "Single demo" in admin.text
     assert 'id="supported-models"' in admin.text
     assert "6300F 24-port (JL666A)" in admin.text
+    assert "6300M 24-port (JL660A)" in admin.text
 
     config = client.get("/api/admin/config").json()
     blob = json.dumps(config)
@@ -57,7 +66,11 @@ def test_seed_and_pages(client):
     assert snap["ports"] == []
     assert snap["access_port_count"] == 0
     assert snap["model"] == ""
-    assert snap["supported_models"] == ["6200F 12-port", "6300F 24-port (JL666A)"]
+    assert snap["supported_models"] == [
+        "6200F 12-port",
+        "6300F 24-port (JL666A)",
+        "6300M 24-port (JL660A)",
+    ]
     assert all(item["label"] != "Nothing Connected" for item in snap["legend"])
 
 

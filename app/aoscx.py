@@ -14,6 +14,7 @@ ACCESS_PORT_COUNT = 12
 SUPPORTED_MODELS = (
     "6200F 12-port",
     "6300F 24-port (JL666A)",
+    "6300M 24-port (JL660A)",
 )
 
 
@@ -41,6 +42,14 @@ FACEPLATES = (
         label="6300F 24-port (JL666A)",
         heading="AOS-CX 6300F",
         part_numbers=frozenset({"JL666A", "S0G96A"}),
+        access_ports=24,
+        last_physical=28,
+    ),
+    FaceplateModel(
+        id="cx6300m-24",
+        label="6300M 24-port (JL660A)",
+        heading="AOS-CX 6300M",
+        part_numbers=frozenset({"JL660A"}),
         access_ports=24,
         last_physical=28,
     ),
@@ -249,12 +258,19 @@ def conflicting_port(payload: object, member: int, last_physical: int) -> int:
     return over
 
 
+def supported_sentence() -> str:
+    labels = SUPPORTED_MODELS
+    if len(labels) == 1:
+        listed = labels[0]
+    else:
+        listed = ", ".join(labels[:-1]) + ", and " + labels[-1]
+    return f"Supported models are the {listed}."
+
+
 def unsupported_note(model_id: str, detected_part: str, conflict_port: int = 0) -> str:
     if model_id:
         return ""
-    supported = (
-        "Supported models are the 6200F 12-port and the 6300F 24-port (JL666A)."
-    )
+    supported = supported_sentence()
     if conflict_port:
         name = detected_part or "the switch"
         return f"This switch reported {name} but has port 1/1/{conflict_port}. {supported}"

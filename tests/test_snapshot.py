@@ -89,7 +89,21 @@ def test_snapshot_follows_the_detected_chassis():
     assert wide["detected_part"] == "JL666A"
     assert wide["ports"][23]["name"] == "1/1/24"
     assert wide["ports"][23]["status"] == "up"
-    assert wide["supported_models"] == ["6200F 12-port", "6300F 24-port (JL666A)"]
+    assert wide["supported_models"] == [
+        "6200F 12-port",
+        "6300F 24-port (JL666A)",
+        "6300M 24-port (JL660A)",
+    ]
+    smart = build_snapshot(
+        [RawPort(24, "1/1/24", "up")],
+        SETTINGS,
+        ROLES,
+        {"configured": True, "model": "cx6300m-24", "detected_part": "JL660A"},
+    )
+    assert smart["access_port_count"] == 24
+    assert len(smart["ports"]) == 24
+    assert smart["model_heading"] == "AOS-CX 6300M"
+    assert smart["detected_part"] == "JL660A"
 
 
 def paint(ports, **overrides):
