@@ -6,6 +6,7 @@ function cxHeading(model, heading) {
   if (heading) return heading;
   if (model === "cx6200f-12") return "AOS-CX 6200F";
   if (model === "cx6300f-24") return "AOS-CX 6300F";
+  if (model === "cx6300m-24") return "AOS-CX 6300M";
   return "AOS-CX";
 }
 
@@ -13,7 +14,7 @@ function cxHint(model) {
   if (model === "cx6200f-12") {
     return "Ports 1–12 light from the access role. Click a lit port to pin its details. The 1G, SFP, and management ports on the right stay dark.";
   }
-  if (model === "cx6300f-24") {
+  if (model === "cx6300f-24" || model === "cx6300m-24") {
     return "Ports 1–24 light from the access role. Click a lit port to pin its details. The SFP56, console, and management ports on the right stay dark.";
   }
   return "The faceplate appears after the switch reports a supported model.";

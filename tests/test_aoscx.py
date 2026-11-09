@@ -448,6 +448,20 @@ def test_jl666a_and_taa_twin_select_the_24_port_face():
         assert read.model_note == ""
 
 
+def test_jl660a_uses_the_same_24_port_face_area():
+    for part in ("JL660A", "JL660A#ACC"):
+        read = _poll(part, {"1/1/1": {"link_state": "up"}, "1/1/24": {"link_state": "down"}, "1/1/28": {"link_state": "up"}})
+        assert read.model_id == "cx6300m-24"
+        assert read.model_label == "6300M 24-port (JL660A)"
+        assert read.model_heading == "AOS-CX 6300M"
+        assert read.detected_part == "JL660A"
+        assert [port.number for port in read.ports] == list(range(1, 25))
+        assert read.model_note == ""
+    conflict = _poll("JL660A", {"1/1/1": {"link_state": "up"}, "1/1/48": {"link_state": "up"}})
+    assert conflict.model_id == ""
+    assert conflict.ports == []
+
+
 def test_unknown_part_and_extra_interfaces_leave_the_face_blank():
     unknown = _poll("JL725A", {"1/1/1": {"link_state": "up"}}, platform_name="6300")
     assert unknown.model_id == ""
@@ -455,6 +469,7 @@ def test_unknown_part_and_extra_interfaces_leave_the_face_blank():
     assert unknown.detected_part == "JL725A"
     assert "6200F 12-port" in unknown.model_note
     assert "6300F 24-port (JL666A)" in unknown.model_note
+    assert "6300M 24-port (JL660A)" in unknown.model_note
 
     conflict = _poll("JL666A", {"1/1/1": {"link_state": "up"}, "1/1/48": {"link_state": "up"}})
     assert conflict.model_id == ""
